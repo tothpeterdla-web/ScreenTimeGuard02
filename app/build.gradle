@@ -1,0 +1,21 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.example.screentimeguard'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.example.screentimeguard"
+        minSdk 28
+        targetSdk 35
+        versionCode 3
+        versionName "3.0-github"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
