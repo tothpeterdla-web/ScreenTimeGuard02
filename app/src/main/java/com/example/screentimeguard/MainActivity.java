@@ -1,0 +1,115 @@
+package com.example.screentimeguard;
+
+import android.Manifest;
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.Bundle;
+import android.provider.Settings;
+import android.text.InputType;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+public class MainActivity extends Activity {
+    private TextView status;
+    private EditText hours;
+    private EditText minutes;
+
+    @Override protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        buildUi();
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},100);
+        }
+    }
+
+    @Override protected void onResume(){ super.onResume(); refresh(); }
+
+    private void buildUi(){
+        ScrollView scroll=new ScrollView(this);
+        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); int p=dp(18); root.setPadding(p,p,p,p); scroll.addView(root);
+
+        TextView title=new TextView(this); title.setText("Screen Time Guard"); title.setTextSize(30); root.addView(title,full());
+        TextView info=new TextView(this); info.setText("Set a daily screen-time allowance. After the limit, notifications remain visible and Android system apps stay usable, while browsers, app stores and third-party app activities are blocked. Guardian PIN protects settings and uninstall release."); info.setTextSize(16); root.addView(info,full());
+        status=new TextView(this); status.setTextSize(16); root.addView(status,full());
+
+        Button usage=new Button(this); usage.setText("Open Usage Access settings"); usage.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))); root.addView(usage,full());
+
+        LinearLayout row=new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL);
+        hours=num("hours"); minutes=num("minutes");
+        row.addView(hours,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        row.addView(minutes,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f)); root.addView(row,full());
+
+        Button save=new Button(this); save.setText("Save daily limit"); save.setOnClickListener(v->requirePin(this::saveLimit)); root.addView(save,full());
+        Button pin=new Button(this); pin.setText("Set / change guardian PIN"); pin.setOnClickListener(v->{ if(PinStore.hasPin(this)) requirePin(this::setPin); else setPin(); }); root.addView(pin,full());
+        Button enable=new Button(this); enable.setText("Enable strong protection"); enable.setOnClickListener(v->enable()); root.addView(enable,full());
+        Button disable=new Button(this); disable.setText("Disable protection (guardian PIN)"); disable.setOnClickListener(v->requirePin(this::disable)); root.addView(disable,full());
+        Button release=new Button(this); release.setText("Release device owner / allow uninstall"); release.setOnClickListener(v->requirePin(this::release)); root.addView(release,full());
+
+        setContentView(scroll);
+    }
+
+    private void refresh(){
+        int l=Prefs.getLimitMinutes(this); hours.setText(String.valueOf(l/60)); minutes.setText(String.valueOf(l%60));
+        long used=ScreenTimeTracker.hasUsageAccess(this)?ScreenTimeTracker.getTodayInteractiveMillis(this):-1L;
+        status.setText("\nDevice Owner: "+yn(PolicyUtils.isDeviceOwner(this))+"\nUsage Access: "+yn(ScreenTimeTracker.hasUsageAccess(this))+"\nGuardian PIN: "+yn(PinStore.hasPin(this))+"\nProtection enabled: "+yn(Prefs.isEnabled(this))+"\nToday's screen time: "+ScreenTimeTracker.formatDuration(used)+"\n");
+    }
+
+    private void enable(){
+        if(!PolicyUtils.isDeviceOwner(this)){ msg("Device Owner required","Provision the app as Android Device Owner first."); return; }
+        if(!ScreenTimeTracker.hasUsageAccess(this)){ msg("Usage Access required","Grant Usage Access first."); return; }
+        if(!PinStore.hasPin(this)){ msg("Guardian PIN required","Have someone else set the guardian PIN first."); return; }
+        Prefs.clearOverride(this); Prefs.setEnabled(this,true); PolicyUtils.applyPersistentPolicies(this);
+        Intent s=new Intent(this,ScreenTimeService.class); if(Build.VERSION.SDK_INT>=26) startForegroundService(s); else startService(s);
+        Toast.makeText(this,"Protection enabled",Toast.LENGTH_SHORT).show(); refresh();
+    }
+
+    private void disable(){ Prefs.setEnabled(this,false); Prefs.clearOverride(this); stopService(new Intent(this,ScreenTimeService.class)); PolicyUtils.removePersistentPolicies(this); Toast.makeText(this,"Protection disabled",Toast.LENGTH_SHORT).show(); refresh(); }
+
+    private void release(){
+        Prefs.setEnabled(this,false); stopService(new Intent(this,ScreenTimeService.class));
+        boolean ok=PolicyUtils.releaseDeviceOwnerForUninstall(this);
+        Toast.makeText(this,ok?"Device Owner released; uninstall is allowed":"Release failed; factory reset may be required",Toast.LENGTH_LONG).show(); refresh();
+    }
+
+    private void saveLimit(){
+        try{
+            int h=hours.getText().toString().isEmpty()?0:Integer.parseInt(hours.getText().toString());
+            int m=minutes.getText().toString().isEmpty()?0:Integer.parseInt(minutes.getText().toString());
+            int total=h*60+m; if(h<0||m<0||m>59||total<1) throw new Exception();
+            Prefs.setLimitMinutes(this,total); Prefs.clearOverride(this); Toast.makeText(this,"Daily limit saved",Toast.LENGTH_SHORT).show(); refresh();
+        }catch(Exception e){ Toast.makeText(this,"Enter valid hours/minutes",Toast.LENGTH_SHORT).show(); }
+    }
+
+    private void setPin(){
+        LinearLayout box=new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL);
+        EditText a=pinField("New guardian PIN"), b=pinField("Confirm guardian PIN"); box.addView(a); box.addView(b);
+        new AlertDialog.Builder(this).setTitle("Guardian PIN").setView(box)
+                .setPositiveButton("Save",(d,w)->{
+                    String x=a.getText().toString(); if(x.length()>=4 && x.equals(b.getText().toString()) && PinStore.setPin(this,x)) Toast.makeText(this,"PIN saved",Toast.LENGTH_SHORT).show();
+                    else Toast.makeText(this,"PINs must match and be at least 4 digits",Toast.LENGTH_LONG).show(); refresh();
+                }).setNegativeButton("Cancel",null).show();
+    }
+
+    private void requirePin(Runnable action){
+        if(!PinStore.hasPin(this)){ msg("No guardian PIN","Set a guardian PIN first."); return; }
+        EditText p=pinField("Guardian PIN");
+        new AlertDialog.Builder(this).setTitle("Guardian authorization").setView(p)
+                .setPositiveButton("Continue",(d,w)->{ if(PinStore.verify(this,p.getText().toString())) action.run(); else Toast.makeText(this,"Wrong PIN",Toast.LENGTH_SHORT).show(); })
+                .setNegativeButton("Cancel",null).show();
+    }
+
+    private EditText num(String hint){ EditText e=new EditText(this); e.setHint(hint); e.setInputType(InputType.TYPE_CLASS_NUMBER); return e; }
+    private EditText pinField(String hint){ EditText e=num(hint); e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD); return e; }
+    private String yn(boolean b){ return b?"YES":"NO"; }
+    private void msg(String t,String m){ new AlertDialog.Builder(this).setTitle(t).setMessage(m).setPositiveButton("OK",null).show(); }
+    private LinearLayout.LayoutParams full(){ LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT); p.setMargins(0,dp(5),0,dp(5)); return p; }
+    private int dp(int v){ return Math.round(v*getResources().getDisplayMetrics().density); }
+}
