@@ -28,48 +28,105 @@ public class ScreenTimeService extends Service {
         super.onCreate();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
-            if (nm != null) nm.createNotificationChannel(new NotificationChannel(CHANNEL,"Screen Time Guard",NotificationManager.IMPORTANCE_LOW));
+            if (nm != null) {
+                NotificationChannel channel = new NotificationChannel(
+                        CHANNEL,
+                        "Screen Time Guard",
+                        NotificationManager.IMPORTANCE_LOW
+                );
+                channel.setDescription("Shows today's used and remaining screen time.");
+                nm.createNotificationChannel(channel);
+            }
         }
-        Notification n = buildNotification("Starting…");
+
+        Notification n = buildNotification("Starting screen-time monitor…");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(ID,n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED);
-        } else startForeground(ID,n);
+            startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        } else {
+            startForeground(ID, n);
+        }
         handler.post(poll);
     }
 
-    @Override public int onStartCommand(Intent intent, int flags, int startId) { return START_STICKY; }
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        return START_STICKY;
+    }
 
     private void tick() {
-        if (!Prefs.isEnabled(this)) { stopSelf(); return; }
-        if (!PolicyUtils.isDeviceOwner(this)) { update("Device Owner not active"); return; }
-        PolicyUtils.applyPersistentPolicies(this);
-        if (!ScreenTimeTracker.hasUsageAccess(this)) { update("Usage Access missing"); return; }
-        if (Prefs.isOverrideActive(this)) { update("Guardian override active until midnight"); return; }
+        if (!ScreenTimeTracker.hasUsageAccess(this)) {
+            update("Usage Access missing");
+            return;
+        }
+
         long used = ScreenTimeTracker.getTodayInteractiveMillis(this);
+        if (used < 0L) {
+            update("Unable to read today's screen time");
+            return;
+        }
+
         long limit = Prefs.getLimitMinutes(this) * 60000L;
+        long remaining = Math.max(0L, limit - used);
+
+        String counter = "Used: " + ScreenTimeTracker.formatDuration(used)
+                + " · Remaining: " + ScreenTimeTracker.formatDuration(remaining);
+
+        // Monitor-only mode: show the live counter but do not enforce anything.
+        if (!Prefs.isEnabled(this)) {
+            update(counter);
+            return;
+        }
+
+        if (!PolicyUtils.isDeviceOwner(this)) {
+            update(counter + " · Device Owner not active");
+            return;
+        }
+
+        PolicyUtils.applyPersistentPolicies(this);
+
+        if (Prefs.isOverrideActive(this)) {
+            update(counter + " · Guardian override until midnight");
+            return;
+        }
+
         if (used >= limit) {
-            update("Daily limit reached");
+            update("Daily limit reached · Used: " + ScreenTimeTracker.formatDuration(used));
             PolicyUtils.launchLockActivity(this);
-        } else update("Remaining: " + ScreenTimeTracker.formatDuration(limit-used));
+        } else {
+            update(counter);
+        }
     }
 
     private Notification buildNotification(String text) {
         Intent i = new Intent(this, MainActivity.class);
-        PendingIntent pi = PendingIntent.getActivity(this,0,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        return new Notification.Builder(this,CHANNEL)
+        PendingIntent pi = PendingIntent.getActivity(
+                this,
+                0,
+                i,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
+        return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
                 .setContentTitle("Screen Time Guard")
                 .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
                 .setOngoing(true)
+                .setOnlyAlertOnce(true)
                 .setContentIntent(pi)
                 .build();
     }
 
     private void update(String text) {
-        NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
-        if(nm!=null) nm.notify(ID,buildNotification(text));
+        NotificationManager nm = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+        if (nm != null) nm.notify(ID, buildNotification(text));
     }
 
-    @Override public void onDestroy() { handler.removeCallbacksAndMessages(null); super.onDestroy(); }
-    @Override public IBinder onBind(Intent intent) { return null; }
+    @Override public void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
+        super.onDestroy();
+    }
+
+    @Override public IBinder onBind(Intent intent) {
+        return null;
+    }
 }
