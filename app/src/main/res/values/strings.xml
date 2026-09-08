@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Screen Time Guard</string>
+    <string name="device_admin_description">Daily screen-time guard with guardian-controlled restrictions.</string>
+</resources>
