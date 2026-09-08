@@ -25,19 +25,27 @@ public class MainActivity extends Activity {
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildUi();
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},100);
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 100);
         }
     }
 
-    @Override protected void onResume(){ super.onResume(); refresh(); }
+    @Override protected void onResume() {
+        super.onResume();
+        refresh();
+        if (ScreenTimeTracker.hasUsageAccess(this)) {
+            startMonitorService();
+        }
+    }
 
     private void buildUi(){
         ScrollView scroll=new ScrollView(this);
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); int p=dp(18); root.setPadding(p,p,p,p); scroll.addView(root);
 
         TextView title=new TextView(this); title.setText("Screen Time Guard"); title.setTextSize(30); root.addView(title,full());
-        TextView info=new TextView(this); info.setText("Set a daily screen-time allowance. After the limit, notifications remain visible and Android system apps stay usable, while browsers, app stores and third-party app activities are blocked. Guardian PIN protects settings and uninstall release."); info.setTextSize(16); root.addView(info,full());
+        TextView info=new TextView(this); info.setText("Set a daily screen-time allowance. After the limit, notifications remain visible and Android system apps stay usable, while browsers, app stores and third-party app activities are blocked. Guardian PIN protects settings and uninstall release. Once Usage Access is granted, a persistent notification shows today's used and remaining screen time even before strong protection is enabled."); info.setTextSize(16); root.addView(info,full());
         status=new TextView(this); status.setTextSize(16); root.addView(status,full());
 
         Button usage=new Button(this); usage.setText("Open Usage Access settings"); usage.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))); root.addView(usage,full());
@@ -59,7 +67,23 @@ public class MainActivity extends Activity {
     private void refresh(){
         int l=Prefs.getLimitMinutes(this); hours.setText(String.valueOf(l/60)); minutes.setText(String.valueOf(l%60));
         long used=ScreenTimeTracker.hasUsageAccess(this)?ScreenTimeTracker.getTodayInteractiveMillis(this):-1L;
-        status.setText("\nDevice Owner: "+yn(PolicyUtils.isDeviceOwner(this))+"\nUsage Access: "+yn(ScreenTimeTracker.hasUsageAccess(this))+"\nGuardian PIN: "+yn(PinStore.hasPin(this))+"\nProtection enabled: "+yn(Prefs.isEnabled(this))+"\nToday's screen time: "+ScreenTimeTracker.formatDuration(used)+"\n");
+        long remaining = used < 0 ? -1L : Math.max(0L, l * 60000L - used);
+        status.setText("\nDevice Owner: "+yn(PolicyUtils.isDeviceOwner(this))
+                +"\nUsage Access: "+yn(ScreenTimeTracker.hasUsageAccess(this))
+                +"\nGuardian PIN: "+yn(PinStore.hasPin(this))
+                +"\nProtection enabled: "+yn(Prefs.isEnabled(this))
+                +"\nToday's screen time: "+ScreenTimeTracker.formatDuration(used)
+                +"\nRemaining today: "+ScreenTimeTracker.formatDuration(remaining)+"\n");
+    }
+
+    private void startMonitorService() {
+        Intent s = new Intent(this, ScreenTimeService.class);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(s);
+            else startService(s);
+        } catch (Exception e) {
+            Toast.makeText(this, "Could not start screen-time notification", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void enable(){
@@ -67,15 +91,23 @@ public class MainActivity extends Activity {
         if(!ScreenTimeTracker.hasUsageAccess(this)){ msg("Usage Access required","Grant Usage Access first."); return; }
         if(!PinStore.hasPin(this)){ msg("Guardian PIN required","Have someone else set the guardian PIN first."); return; }
         Prefs.clearOverride(this); Prefs.setEnabled(this,true); PolicyUtils.applyPersistentPolicies(this);
-        Intent s=new Intent(this,ScreenTimeService.class); if(Build.VERSION.SDK_INT>=26) startForegroundService(s); else startService(s);
+        startMonitorService();
         Toast.makeText(this,"Protection enabled",Toast.LENGTH_SHORT).show(); refresh();
     }
 
-    private void disable(){ Prefs.setEnabled(this,false); Prefs.clearOverride(this); stopService(new Intent(this,ScreenTimeService.class)); PolicyUtils.removePersistentPolicies(this); Toast.makeText(this,"Protection disabled",Toast.LENGTH_SHORT).show(); refresh(); }
+    private void disable(){
+        Prefs.setEnabled(this,false);
+        Prefs.clearOverride(this);
+        PolicyUtils.removePersistentPolicies(this);
+        if (ScreenTimeTracker.hasUsageAccess(this)) startMonitorService();
+        Toast.makeText(this,"Protection disabled; screen-time notification remains active",Toast.LENGTH_SHORT).show();
+        refresh();
+    }
 
     private void release(){
-        Prefs.setEnabled(this,false); stopService(new Intent(this,ScreenTimeService.class));
+        Prefs.setEnabled(this,false);
         boolean ok=PolicyUtils.releaseDeviceOwnerForUninstall(this);
+        if (ScreenTimeTracker.hasUsageAccess(this)) startMonitorService();
         Toast.makeText(this,ok?"Device Owner released; uninstall is allowed":"Release failed; factory reset may be required",Toast.LENGTH_LONG).show(); refresh();
     }
 
@@ -84,7 +116,9 @@ public class MainActivity extends Activity {
             int h=hours.getText().toString().isEmpty()?0:Integer.parseInt(hours.getText().toString());
             int m=minutes.getText().toString().isEmpty()?0:Integer.parseInt(minutes.getText().toString());
             int total=h*60+m; if(h<0||m<0||m>59||total<1) throw new Exception();
-            Prefs.setLimitMinutes(this,total); Prefs.clearOverride(this); Toast.makeText(this,"Daily limit saved",Toast.LENGTH_SHORT).show(); refresh();
+            Prefs.setLimitMinutes(this,total); Prefs.clearOverride(this);
+            if (ScreenTimeTracker.hasUsageAccess(this)) startMonitorService();
+            Toast.makeText(this,"Daily limit saved",Toast.LENGTH_SHORT).show(); refresh();
         }catch(Exception e){ Toast.makeText(this,"Enter valid hours/minutes",Toast.LENGTH_SHORT).show(); }
     }
 
