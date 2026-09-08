@@ -8,11 +8,18 @@ import android.os.Build;
 public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (!Prefs.isEnabled(context)) return;
+        // Usage Access survives reboot. Start the monitor whenever it is available,
+        // even if strong Device Owner protection has not been enabled yet.
+        if (!ScreenTimeTracker.hasUsageAccess(context)) return;
+
         Intent s = new Intent(context, ScreenTimeService.class);
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(s);
-            else context.startService(s);
-        } catch (Exception ignored) {}
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(s);
+            } else {
+                context.startService(s);
+            }
+        } catch (Exception ignored) {
+        }
     }
 }
