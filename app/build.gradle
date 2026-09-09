@@ -2,6 +2,11 @@ plugins {
     id 'com.android.application'
 }
 
+def signingReady = System.getenv("ANDROID_KEYSTORE_PATH") &&
+        System.getenv("ANDROID_KEYSTORE_PASSWORD") &&
+        System.getenv("ANDROID_KEY_ALIAS") &&
+        System.getenv("ANDROID_KEY_PASSWORD")
+
 android {
     namespace 'com.example.screentimeguard'
     compileSdk 35
@@ -10,8 +15,28 @@ android {
         applicationId "com.example.screentimeguard"
         minSdk 28
         targetSdk 35
-        versionCode 3
-        versionName "3.0-github"
+        versionCode 4
+        versionName "4.0-signed-ready"
+    }
+
+    signingConfigs {
+        release {
+            if (signingReady) {
+                storeFile file(System.getenv("ANDROID_KEYSTORE_PATH"))
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (signingReady) {
+                signingConfig signingConfigs.release
+            }
+        }
     }
 
     compileOptions {
