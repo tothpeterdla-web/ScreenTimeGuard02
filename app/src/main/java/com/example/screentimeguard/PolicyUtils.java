@@ -29,6 +29,12 @@ public final class PolicyUtils {
             "com.amazon.venezia","com.oppo.market","com.heytap.market","com.bbk.appstore",
             "com.vivo.appstore"));
 
+    // Third-party apps that remain usable after the daily limit is reached.
+    private static final Set<String> ALLOWED_AFTER_LIMIT = new HashSet<>(Arrays.asList(
+            "com.google.android.apps.maps",   // Google Maps
+            "hu.webvalto.bkkfutar"           // BudapestGO
+    ));
+
     public static ComponentName admin(Context c) { return new ComponentName(c, GuardDeviceAdminReceiver.class); }
     public static DevicePolicyManager dpm(Context c) { return (DevicePolicyManager)c.getSystemService(Context.DEVICE_POLICY_SERVICE); }
     public static boolean isDeviceOwner(Context c) { DevicePolicyManager d=dpm(c); return d!=null && d.isDeviceOwnerApp(c.getPackageName()); }
@@ -61,7 +67,14 @@ public final class PolicyUtils {
         allowed.add(c.getPackageName());
         PackageManager pm=c.getPackageManager();
         List<ApplicationInfo> apps=pm.getInstalledApplications(PackageManager.MATCH_ALL);
-        for(ApplicationInfo i:apps) if(system(i) && !BLOCKED.contains(i.packageName)) allowed.add(i.packageName);
+
+        // Keep Android system apps usable (except browsers/app stores), plus the explicit
+        // travel/navigation exceptions requested for restricted mode.
+        for(ApplicationInfo i:apps) {
+            if(system(i) && !BLOCKED.contains(i.packageName)) allowed.add(i.packageName);
+            if(ALLOWED_AFTER_LIMIT.contains(i.packageName)) allowed.add(i.packageName);
+        }
+
         TelecomManager tm=(TelecomManager)c.getSystemService(Context.TELECOM_SERVICE);
         if(tm!=null && tm.getDefaultDialerPackage()!=null) allowed.add(tm.getDefaultDialerPackage());
         DevicePolicyManager d=dpm(c); ComponentName a=admin(c);
