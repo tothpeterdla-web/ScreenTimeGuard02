@@ -4,12 +4,16 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.time.ZonedDateTime;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 public final class Prefs {
     private static final String NAME = "screen_time_guard";
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_LIMIT_MINUTES = "limit_minutes";
     private static final String KEY_OVERRIDE_UNTIL = "override_until";
+    private static final String KEY_EXTRA_ALLOWED_PACKAGES = "extra_allowed_packages";
 
     private Prefs() {}
 
@@ -31,6 +35,18 @@ public final class Prefs {
 
     public static void setLimitMinutes(Context context, int minutes) {
         prefs(context).edit().putInt(KEY_LIMIT_MINUTES, minutes).apply();
+    }
+
+    public static Set<String> getExtraAllowedPackages(Context context) {
+        Set<String> stored = prefs(context).getStringSet(
+                KEY_EXTRA_ALLOWED_PACKAGES, Collections.emptySet());
+        return new HashSet<>(stored == null ? Collections.emptySet() : stored);
+    }
+
+    public static void setExtraAllowedPackages(Context context, Set<String> packages) {
+        prefs(context).edit()
+                .putStringSet(KEY_EXTRA_ALLOWED_PACKAGES, new HashSet<>(packages))
+                .apply();
     }
 
     public static long getOverrideUntil(Context context) {
