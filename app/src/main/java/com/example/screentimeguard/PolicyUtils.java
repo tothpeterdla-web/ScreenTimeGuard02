@@ -21,6 +21,8 @@ import java.util.Set;
 public final class PolicyUtils {
     private PolicyUtils() {}
 
+    private static final String ADULT_FILTER_DNS_HOST = "family.adguard-dns.com";
+
     private static final Set<String> BLOCKED = new HashSet<>(Arrays.asList(
             "com.android.chrome","com.sec.android.app.sbrowser","org.mozilla.firefox",
             "org.mozilla.fenix","com.microsoft.emmx","com.opera.browser","com.brave.browser",
@@ -54,6 +56,36 @@ public final class PolicyUtils {
         try { d.clearUserRestriction(a,UserManager.DISALLOW_CONFIG_DATE_TIME); } catch(Exception ignored) {}
         try { d.clearUserRestriction(a,UserManager.DISALLOW_APPS_CONTROL); } catch(Exception ignored) {}
         try { d.setLockTaskPackages(a,new String[0]); } catch(Exception ignored) {}
+    }
+
+    // Enables a device-wide family DNS filter. This is intentionally separate from the
+    // screen-time lock so it can stay active all day, even before the daily limit is reached.
+    // Must be called off the UI thread because Android performs a resolver connectivity check.
+    public static boolean enableAdultContentFilter(Context c) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !isDeviceOwner(c)) return false;
+        DevicePolicyManager d=dpm(c); ComponentName a=admin(c);
+        try {
+            int result=d.setGlobalPrivateDnsModeSpecifiedHost(a,ADULT_FILTER_DNS_HOST);
+            if(result!=DevicePolicyManager.PRIVATE_DNS_SET_NO_ERROR) return false;
+            d.addUserRestriction(a,UserManager.DISALLOW_CONFIG_PRIVATE_DNS);
+            return true;
+        } catch(Exception e) {
+            return false;
+        }
+    }
+
+    // Restores Android's normal automatic/opportunistic Private DNS mode.
+    // Must be called off the UI thread for symmetry with the enable path.
+    public static boolean disableAdultContentFilter(Context c) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !isDeviceOwner(c)) return false;
+        DevicePolicyManager d=dpm(c); ComponentName a=admin(c);
+        try {
+            d.clearUserRestriction(a,UserManager.DISALLOW_CONFIG_PRIVATE_DNS);
+            int result=d.setGlobalPrivateDnsModeOpportunistic(a);
+            return result==DevicePolicyManager.PRIVATE_DNS_SET_NO_ERROR;
+        } catch(Exception e) {
+            return false;
+        }
     }
 
     private static boolean system(ApplicationInfo i) {
@@ -107,7 +139,15 @@ public final class PolicyUtils {
     @SuppressWarnings("deprecation")
     public static boolean releaseDeviceOwnerForUninstall(Context c) {
         if(!isDeviceOwner(c)) return true;
-        try { removePersistentPolicies(c); dpm(c).clearDeviceOwnerApp(c.getPackageName()); return true; }
+        try {
+            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q) {
+                try { dpm(c).clearUserRestriction(admin(c),UserManager.DISALLOW_CONFIG_PRIVATE_DNS); } catch(Exception ignored) {}
+                try { dpm(c).setGlobalPrivateDnsModeOpportunistic(admin(c)); } catch(Exception ignored) {}
+            }
+            removePersistentPolicies(c);
+            dpm(c).clearDeviceOwnerApp(c.getPackageName());
+            return true;
+        }
         catch(Exception e) { return false; }
     }
 }
