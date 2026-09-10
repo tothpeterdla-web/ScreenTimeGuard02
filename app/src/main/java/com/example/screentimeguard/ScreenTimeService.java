@@ -88,6 +88,12 @@ public class ScreenTimeService extends Service {
         }
 
         if (used >= limit) {
+            // Refresh the Device Owner allowlist on every poll. This makes the restricted
+            // state self-healing after an APK update and guarantees this guardian package,
+            // the launcher/dialer and the guardian-selected apps remain authorized even if
+            // Android retained a stale lock-task package list from an older build.
+            try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
+
             update("Daily limit reached · blocked apps are unavailable");
             if (!PolicyUtils.isRestrictedModeActive(this)) {
                 PolicyUtils.enterRestrictedMode(this);
