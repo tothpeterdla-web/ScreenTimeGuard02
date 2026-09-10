@@ -10,7 +10,6 @@ public final class Prefs {
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_LIMIT_MINUTES = "limit_minutes";
     private static final String KEY_OVERRIDE_UNTIL = "override_until";
-    private static final String KEY_ADULT_FILTER_ENABLED = "adult_filter_enabled";
 
     private Prefs() {}
 
@@ -32,14 +31,6 @@ public final class Prefs {
 
     public static void setLimitMinutes(Context context, int minutes) {
         prefs(context).edit().putInt(KEY_LIMIT_MINUTES, minutes).apply();
-    }
-
-    public static boolean isAdultFilterEnabled(Context context) {
-        return prefs(context).getBoolean(KEY_ADULT_FILTER_ENABLED, false);
-    }
-
-    public static void setAdultFilterEnabled(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_ADULT_FILTER_ENABLED, enabled).apply();
     }
 
     public static long getOverrideUntil(Context context) {
