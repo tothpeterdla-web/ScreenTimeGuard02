@@ -1,15 +1,18 @@
 package com.example.screentimeguard;
 
 import android.app.AppOpsManager;
-import android.app.usage.UsageStats;
+import android.app.usage.UsageEvents;
 import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.os.Process;
 
 import java.time.ZonedDateTime;
-import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 
 public final class ScreenTimeTracker {
+    private static final long LOOKBACK_MS = 24L * 60L * 60L * 1000L;
+
     private ScreenTimeTracker() {}
 
     public static boolean hasUsageAccess(Context context) {
@@ -31,33 +34,76 @@ public final class ScreenTimeTracker {
                 .toEpochMilli();
     }
 
+    private static String activityKey(UsageEvents.Event event) {
+        String pkg = event.getPackageName();
+        String cls = event.getClassName();
+        if (pkg == null) pkg = "";
+        if (cls == null) cls = "";
+        return pkg + "\n" + cls;
+    }
+
+    @SuppressWarnings("deprecation")
     public static long getTodayInteractiveMillis(Context context) {
         if (!hasUsageAccess(context)) return -1L;
 
         long now = System.currentTimeMillis();
         long start = startOfTodayMillis();
+        long queryStart = Math.max(0L, start - LOOKBACK_MS);
 
         UsageStatsManager usm =
                 (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
         if (usm == null) return -1L;
 
-        // Use Android's aggregated foreground-app usage instead of trying to reconstruct
-        // screen-on time from SCREEN_INTERACTIVE / SCREEN_NON_INTERACTIVE events.
-        // Some devices (including the Zenfone 8) can omit/misorder those screen events,
-        // which made the previous implementation count several hours while the screen was off.
-        Map<String, UsageStats> stats = usm.queryAndAggregateUsageStats(start, now);
-        if (stats == null) return -1L;
+        UsageEvents events = usm.queryEvents(queryStart, now);
+        if (events == null) return -1L;
 
+        // Track the UNION of foreground/resumed activities instead of summing each app's
+        // UsageStats.getTotalTimeInForeground(). Android can report overlapping foreground
+        // time for the launcher, System UI, overlays and the actual app; summing those values
+        // therefore double-counted time on the Zenfone 8.
+        //
+        // Using activity transitions also avoids depending solely on SCREEN_INTERACTIVE /
+        // SCREEN_NON_INTERACTIVE, whose stream was incomplete on this device. A screen-off
+        // event is still used when present as an extra safety boundary.
+        Set<String> activeActivities = new HashSet<>();
         long total = 0L;
-        for (UsageStats s : stats.values()) {
-            if (s == null) continue;
-            long foreground = s.getTotalTimeInForeground();
-            if (foreground > 0L) total += foreground;
+        long cursor = start;
+
+        UsageEvents.Event event = new UsageEvents.Event();
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event);
+            long ts = event.getTimeStamp();
+            int type = event.getEventType();
+
+            boolean resumed = type == UsageEvents.Event.MOVE_TO_FOREGROUND;
+            boolean paused = type == UsageEvents.Event.MOVE_TO_BACKGROUND;
+            boolean screenOff = type == UsageEvents.Event.SCREEN_NON_INTERACTIVE;
+
+            if (ts < start) {
+                if (resumed) activeActivities.add(activityKey(event));
+                else if (paused) activeActivities.remove(activityKey(event));
+                else if (screenOff) activeActivities.clear();
+                continue;
+            }
+
+            if (ts > cursor && !activeActivities.isEmpty()) {
+                total += ts - cursor;
+            }
+            if (ts > cursor) cursor = ts;
+
+            if (resumed) {
+                activeActivities.add(activityKey(event));
+            } else if (paused) {
+                activeActivities.remove(activityKey(event));
+            } else if (screenOff) {
+                activeActivities.clear();
+            }
         }
 
-        // Aggregated per-app data can overlap slightly on some Android builds (for example
-        // during activity transitions or split-screen). Never allow the result to exceed
-        // the amount of real time that has elapsed since midnight.
+        if (now > cursor && !activeActivities.isEmpty()) {
+            total += now - cursor;
+        }
+
         long elapsedToday = Math.max(0L, now - start);
         return Math.max(0L, Math.min(total, elapsedToday));
     }
