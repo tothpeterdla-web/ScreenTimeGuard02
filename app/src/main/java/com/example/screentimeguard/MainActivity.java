@@ -113,13 +113,13 @@ public class MainActivity extends Activity {
         if(!PolicyUtils.isDeviceOwner(this)){ msg("Device Owner required","Adult-content filtering requires Device Owner."); return; }
         if(Build.VERSION.SDK_INT < Build.VERSION_CODES.Q){ msg("Android 10 required","This filtering method requires Android 10 or newer."); return; }
         new Thread(() -> {
-            boolean ok=PolicyUtils.enableAdultContentFilter(this);
+            PolicyUtils.AdultFilterResult result=PolicyUtils.enableAdultContentFilter(this);
             runOnUiThread(() -> {
-                if(ok){
+                if(result.success){
                     Prefs.setAdultFilterEnabled(this,true);
-                    Toast.makeText(this,"Adult content filter enabled",Toast.LENGTH_LONG).show();
+                    Toast.makeText(this,"Adult filter enabled via "+result.providerHost,Toast.LENGTH_LONG).show();
                 } else {
-                    msg("Could not enable filter","The family DNS server could not be reached or Android refused the policy. No filter was enabled.");
+                    msg("Could not enable filter",result.error + "\n\nResult code: " + result.lastResultCode);
                 }
                 refresh();
             });
