@@ -21,7 +21,25 @@ import java.util.Set;
 public final class PolicyUtils {
     private PolicyUtils() {}
 
-    private static final String ADULT_FILTER_DNS_HOST = "family.adguard-dns.com";
+    private static final String[] ADULT_FILTER_DNS_HOSTS = new String[]{
+            "family.adguard-dns.com",
+            "family.cloudflare-dns.com",
+            "family-filter-dns.cleanbrowsing.org"
+    };
+
+    public static final class AdultFilterResult {
+        public final boolean success;
+        public final String providerHost;
+        public final int lastResultCode;
+        public final String error;
+
+        AdultFilterResult(boolean success, String providerHost, int lastResultCode, String error) {
+            this.success = success;
+            this.providerHost = providerHost;
+            this.lastResultCode = lastResultCode;
+            this.error = error;
+        }
+    }
 
     private static final Set<String> BLOCKED = new HashSet<>(Arrays.asList(
             "com.android.chrome","com.sec.android.app.sbrowser","org.mozilla.firefox",
@@ -58,20 +76,47 @@ public final class PolicyUtils {
         try { d.setLockTaskPackages(a,new String[0]); } catch(Exception ignored) {}
     }
 
-    // Enables a device-wide family DNS filter. This is intentionally separate from the
-    // screen-time lock so it can stay active all day, even before the daily limit is reached.
+    // Enables a device-wide family DNS filter. Try several reputable DNS-over-TLS
+    // family resolvers because some networks may fail to reach a particular provider.
     // Must be called off the UI thread because Android performs a resolver connectivity check.
-    public static boolean enableAdultContentFilter(Context c) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !isDeviceOwner(c)) return false;
+    public static AdultFilterResult enableAdultContentFilter(Context c) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
+            return new AdultFilterResult(false, null, -1, "Android 10 or newer is required.");
+        if (!isDeviceOwner(c))
+            return new AdultFilterResult(false, null, -1, "The app is not Device Owner.");
+
         DevicePolicyManager d=dpm(c); ComponentName a=admin(c);
-        try {
-            int result=d.setGlobalPrivateDnsModeSpecifiedHost(a,ADULT_FILTER_DNS_HOST);
-            if(result!=DevicePolicyManager.PRIVATE_DNS_SET_NO_ERROR) return false;
-            d.addUserRestriction(a,UserManager.DISALLOW_CONFIG_PRIVATE_DNS);
-            return true;
-        } catch(Exception e) {
-            return false;
+        int lastCode = -1;
+        String lastError = null;
+
+        for (String host : ADULT_FILTER_DNS_HOSTS) {
+            try {
+                int result=d.setGlobalPrivateDnsModeSpecifiedHost(a,host);
+                lastCode=result;
+                if(result==DevicePolicyManager.PRIVATE_DNS_SET_NO_ERROR) {
+                    d.addUserRestriction(a,UserManager.DISALLOW_CONFIG_PRIVATE_DNS);
+                    return new AdultFilterResult(true, host, result, null);
+                }
+            } catch(SecurityException e) {
+                return new AdultFilterResult(false, null, -1,
+                        "Android denied the Device Owner Private DNS policy: " + e.getClass().getSimpleName());
+            } catch(IllegalArgumentException e) {
+                lastError = "Invalid Private DNS hostname: " + host;
+            } catch(Exception e) {
+                lastError = e.getClass().getSimpleName() + (e.getMessage()==null ? "" : ": " + e.getMessage());
+            }
         }
+
+        if (lastError == null) {
+            if(lastCode==DevicePolicyManager.PRIVATE_DNS_SET_ERROR_HOST_NOT_SERVING) {
+                lastError="Android could not reach a DNS-over-TLS family resolver. Your current Wi-Fi/mobile network may be blocking DNS-over-TLS (TCP port 853).";
+            } else if(lastCode==DevicePolicyManager.PRIVATE_DNS_SET_ERROR_FAILURE_SETTING) {
+                lastError="Android refused the Private DNS setting. A secondary user/work profile or an ASUS firmware restriction may be preventing the Device Owner policy.";
+            } else {
+                lastError="Android returned Private DNS result code " + lastCode + ".";
+            }
+        }
+        return new AdultFilterResult(false, null, lastCode, lastError);
     }
 
     // Restores Android's normal automatic/opportunistic Private DNS mode.
