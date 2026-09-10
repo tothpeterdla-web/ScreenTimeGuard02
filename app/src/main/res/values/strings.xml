@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">Screen Time Guard</string>
-    <string name="device_admin_description">Daily screen-time guard with guardian-controlled restrictions.</string>
+    <string name="app_name">AdGuard Guardian</string>
+    <string name="device_admin_description">Keeps AdGuard installed using Android Device Owner.</string>
 </resources>
