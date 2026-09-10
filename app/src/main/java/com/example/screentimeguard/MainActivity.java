@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -16,6 +17,11 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 public class MainActivity extends Activity {
     private TextView status;
@@ -45,7 +51,7 @@ public class MainActivity extends Activity {
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); int p=dp(18); root.setPadding(p,p,p,p); scroll.addView(root);
 
         TextView title=new TextView(this); title.setText("Screen Time Guard"); title.setTextSize(30); root.addView(title,full());
-        TextView info=new TextView(this); info.setText("Set a daily screen-time allowance. After the limit, notifications remain visible and Android system apps stay usable, while browsers, app stores and third-party app activities are blocked. Guardian PIN protects settings and uninstall release. Once Usage Access is granted, a persistent notification shows today's used and remaining screen time even before strong protection is enabled."); info.setTextSize(16); root.addView(info,full());
+        TextView info=new TextView(this); info.setText("Set a daily screen-time allowance. After the limit, notifications remain visible and Android system apps stay usable, while browsers, app stores and other third-party app activities are blocked. Maps and BudapestGO are always allowed, and a guardian can choose additional apps such as banking apps. Guardian PIN protects settings and uninstall release."); info.setTextSize(16); root.addView(info,full());
         status=new TextView(this); status.setTextSize(16); root.addView(status,full());
 
         Button usage=new Button(this); usage.setText("Open Usage Access settings"); usage.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))); root.addView(usage,full());
@@ -56,6 +62,7 @@ public class MainActivity extends Activity {
         row.addView(minutes,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f)); root.addView(row,full());
 
         Button save=new Button(this); save.setText("Save daily limit"); save.setOnClickListener(v->requirePin(this::saveLimit)); root.addView(save,full());
+        Button apps=new Button(this); apps.setText("Choose apps allowed after limit"); apps.setOnClickListener(v->requirePin(this::chooseAllowedApps)); root.addView(apps,full());
         Button pin=new Button(this); pin.setText("Set / change guardian PIN"); pin.setOnClickListener(v->{ if(PinStore.hasPin(this)) requirePin(this::setPin); else setPin(); }); root.addView(pin,full());
         Button enable=new Button(this); enable.setText("Enable strong protection"); enable.setOnClickListener(v->enable()); root.addView(enable,full());
         Button disable=new Button(this); disable.setText("Disable protection (guardian PIN)"); disable.setOnClickListener(v->requirePin(this::disable)); root.addView(disable,full());
@@ -71,6 +78,7 @@ public class MainActivity extends Activity {
         status.setText("\nDevice Owner: "+yn(PolicyUtils.isDeviceOwner(this))
                 +"\nUsage Access: "+yn(ScreenTimeTracker.hasUsageAccess(this))
                 +"\nGuardian PIN: "+yn(PinStore.hasPin(this))
+                +"\nExtra apps allowed after limit: "+Prefs.getExtraAllowedPackages(this).size()
                 +"\nProtection enabled: "+yn(Prefs.isEnabled(this))
                 +"\nToday's screen time: "+ScreenTimeTracker.formatDuration(used)
                 +"\nRemaining today: "+ScreenTimeTracker.formatDuration(remaining)+"\n");
@@ -120,6 +128,53 @@ public class MainActivity extends Activity {
             if (ScreenTimeTracker.hasUsageAccess(this)) startMonitorService();
             Toast.makeText(this,"Daily limit saved",Toast.LENGTH_SHORT).show(); refresh();
         }catch(Exception e){ Toast.makeText(this,"Enter valid hours/minutes",Toast.LENGTH_SHORT).show(); }
+    }
+
+    private void chooseAllowedApps(){
+        PackageManager pm=getPackageManager();
+        List<ApplicationInfo> installed=pm.getInstalledApplications(PackageManager.MATCH_ALL);
+        ArrayList<ApplicationInfo> candidates=new ArrayList<>();
+
+        for(ApplicationInfo app:installed){
+            boolean system=(app.flags & (ApplicationInfo.FLAG_SYSTEM|ApplicationInfo.FLAG_UPDATED_SYSTEM_APP))!=0;
+            if(system) continue;
+            if(app.packageName.equals(getPackageName())) continue;
+            if(PolicyUtils.isAlwaysBlockedPackage(app.packageName)) continue;
+            if(PolicyUtils.isBuiltInAllowedPackage(app.packageName)) continue;
+            if(pm.getLaunchIntentForPackage(app.packageName)==null) continue;
+            candidates.add(app);
+        }
+
+        candidates.sort((a,b)->String.valueOf(pm.getApplicationLabel(a))
+                .compareToIgnoreCase(String.valueOf(pm.getApplicationLabel(b))));
+
+        CharSequence[] labels=new CharSequence[candidates.size()];
+        boolean[] checked=new boolean[candidates.size()];
+        Set<String> current=Prefs.getExtraAllowedPackages(this);
+        Set<String> working=new HashSet<>(current);
+
+        for(int i=0;i<candidates.size();i++){
+            ApplicationInfo app=candidates.get(i);
+            labels[i]=pm.getApplicationLabel(app);
+            checked[i]=current.contains(app.packageName);
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Apps allowed after the limit")
+                .setMultiChoiceItems(labels,checked,(d,which,isChecked)->{
+                    String pkg=candidates.get(which).packageName;
+                    if(isChecked) working.add(pkg); else working.remove(pkg);
+                })
+                .setPositiveButton("Save",(d,w)->{
+                    Prefs.setExtraAllowedPackages(this,working);
+                    if(Prefs.isEnabled(this) && PolicyUtils.isDeviceOwner(this)) {
+                        PolicyUtils.prepareRestrictedLockTask(this);
+                    }
+                    Toast.makeText(this,"Allowed apps updated",Toast.LENGTH_SHORT).show();
+                    refresh();
+                })
+                .setNegativeButton("Cancel",null)
+                .show();
     }
 
     private void setPin(){
