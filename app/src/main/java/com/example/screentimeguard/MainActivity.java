@@ -45,7 +45,7 @@ public class MainActivity extends Activity {
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); int p=dp(18); root.setPadding(p,p,p,p); scroll.addView(root);
 
         TextView title=new TextView(this); title.setText("Screen Time Guard"); title.setTextSize(30); root.addView(title,full());
-        TextView info=new TextView(this); info.setText("Set a daily screen-time allowance. After the limit, notifications remain visible and Android system apps stay usable, while browsers, app stores and third-party app activities are blocked. Guardian PIN protects settings and uninstall release. An optional guardian-controlled adult-content filter can stay active all day. Once Usage Access is granted, a persistent notification shows today's used and remaining screen time even before strong protection is enabled."); info.setTextSize(16); root.addView(info,full());
+        TextView info=new TextView(this); info.setText("Set a daily screen-time allowance. After the limit, notifications remain visible and Android system apps stay usable, while browsers, app stores and third-party app activities are blocked. Guardian PIN protects settings and uninstall release. Once Usage Access is granted, a persistent notification shows today's used and remaining screen time even before strong protection is enabled."); info.setTextSize(16); root.addView(info,full());
         status=new TextView(this); status.setTextSize(16); root.addView(status,full());
 
         Button usage=new Button(this); usage.setText("Open Usage Access settings"); usage.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))); root.addView(usage,full());
@@ -57,10 +57,6 @@ public class MainActivity extends Activity {
 
         Button save=new Button(this); save.setText("Save daily limit"); save.setOnClickListener(v->requirePin(this::saveLimit)); root.addView(save,full());
         Button pin=new Button(this); pin.setText("Set / change guardian PIN"); pin.setOnClickListener(v->{ if(PinStore.hasPin(this)) requirePin(this::setPin); else setPin(); }); root.addView(pin,full());
-
-        Button adultOn=new Button(this); adultOn.setText("Enable adult content filter (guardian PIN)"); adultOn.setOnClickListener(v->requirePin(this::enableAdultFilter)); root.addView(adultOn,full());
-        Button adultOff=new Button(this); adultOff.setText("Disable adult content filter (guardian PIN)"); adultOff.setOnClickListener(v->requirePin(this::disableAdultFilter)); root.addView(adultOff,full());
-
         Button enable=new Button(this); enable.setText("Enable strong protection"); enable.setOnClickListener(v->enable()); root.addView(enable,full());
         Button disable=new Button(this); disable.setText("Disable protection (guardian PIN)"); disable.setOnClickListener(v->requirePin(this::disable)); root.addView(disable,full());
         Button release=new Button(this); release.setText("Release device owner / allow uninstall"); release.setOnClickListener(v->requirePin(this::release)); root.addView(release,full());
@@ -75,7 +71,6 @@ public class MainActivity extends Activity {
         status.setText("\nDevice Owner: "+yn(PolicyUtils.isDeviceOwner(this))
                 +"\nUsage Access: "+yn(ScreenTimeTracker.hasUsageAccess(this))
                 +"\nGuardian PIN: "+yn(PinStore.hasPin(this))
-                +"\nAdult content filter: "+yn(Prefs.isAdultFilterEnabled(this))
                 +"\nProtection enabled: "+yn(Prefs.isEnabled(this))
                 +"\nToday's screen time: "+ScreenTimeTracker.formatDuration(used)
                 +"\nRemaining today: "+ScreenTimeTracker.formatDuration(remaining)+"\n");
@@ -109,44 +104,9 @@ public class MainActivity extends Activity {
         refresh();
     }
 
-    private void enableAdultFilter(){
-        if(!PolicyUtils.isDeviceOwner(this)){ msg("Device Owner required","Adult-content filtering requires Device Owner."); return; }
-        if(Build.VERSION.SDK_INT < Build.VERSION_CODES.Q){ msg("Android 10 required","This filtering method requires Android 10 or newer."); return; }
-        new Thread(() -> {
-            PolicyUtils.AdultFilterResult result=PolicyUtils.enableAdultContentFilter(this);
-            runOnUiThread(() -> {
-                if(result.success){
-                    Prefs.setAdultFilterEnabled(this,true);
-                    Toast.makeText(this,"Adult filter enabled via "+result.providerHost,Toast.LENGTH_LONG).show();
-                } else {
-                    msg("Could not enable filter",result.error + "\n\nResult code: " + result.lastResultCode);
-                }
-                refresh();
-            });
-        }).start();
-    }
-
-    private void disableAdultFilter(){
-        if(!PolicyUtils.isDeviceOwner(this)){ msg("Device Owner required","Adult-content filtering requires Device Owner."); return; }
-        if(Build.VERSION.SDK_INT < Build.VERSION_CODES.Q){ msg("Android 10 required","This filtering method requires Android 10 or newer."); return; }
-        new Thread(() -> {
-            boolean ok=PolicyUtils.disableAdultContentFilter(this);
-            runOnUiThread(() -> {
-                if(ok){
-                    Prefs.setAdultFilterEnabled(this,false);
-                    Toast.makeText(this,"Adult content filter disabled",Toast.LENGTH_LONG).show();
-                } else {
-                    msg("Could not disable filter","Android could not restore the normal Private DNS mode. Try again while connected to the internet.");
-                }
-                refresh();
-            });
-        }).start();
-    }
-
     private void release(){
         Prefs.setEnabled(this,false);
         boolean ok=PolicyUtils.releaseDeviceOwnerForUninstall(this);
-        if(ok) Prefs.setAdultFilterEnabled(this,false);
         if (ScreenTimeTracker.hasUsageAccess(this)) startMonitorService();
         Toast.makeText(this,ok?"Device Owner released; uninstall is allowed":"Release failed; factory reset may be required",Toast.LENGTH_LONG).show(); refresh();
     }
