@@ -96,6 +96,13 @@ public final class PolicyUtils {
                     DevicePolicyManager.LOCK_TASK_FEATURE_OVERVIEW |
                     DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS |
                     DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD;
+
+            // Android 11+ can otherwise allow a non-allowlisted activity to be launched
+            // into an already-allowed locked task (for example from the launcher). Block
+            // those activity starts so third-party apps really stay inaccessible.
+            if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R) {
+                f |= DevicePolicyManager.LOCK_TASK_FEATURE_BLOCK_ACTIVITY_START_IN_TASK;
+            }
             d.setLockTaskFeatures(a,f);
         }
     }
