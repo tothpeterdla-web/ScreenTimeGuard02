@@ -1,5 +1,6 @@
 package com.example.screentimeguard;
 
+import android.app.ActivityManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -90,9 +91,27 @@ public class ScreenTimeService extends Service {
 
         if (used >= limit) {
             update("Daily limit reached · Used: " + ScreenTimeTracker.formatDuration(used));
-            PolicyUtils.launchLockActivity(this);
+
+            // Once restricted Lock Task mode is active, allowed apps are supposed to be
+            // usable inside that mode. Do NOT push LockActivity to the foreground every
+            // 15 seconds, otherwise a banking/Maps/BudapestGO app gets immediately covered
+            // by the limit screen again. If Lock Task mode ever ends unexpectedly, the next
+            // poll will see NONE and restore the restriction screen.
+            if (!isRestrictedLockTaskActive()) {
+                PolicyUtils.launchLockActivity(this);
+            }
         } else {
             update(counter);
+        }
+    }
+
+    private boolean isRestrictedLockTaskActive() {
+        try {
+            ActivityManager am = (ActivityManager)getSystemService(ACTIVITY_SERVICE);
+            return am != null
+                    && am.getLockTaskModeState() != ActivityManager.LOCK_TASK_MODE_NONE;
+        } catch (Exception ignored) {
+            return false;
         }
     }
 
