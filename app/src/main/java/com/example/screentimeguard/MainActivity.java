@@ -59,7 +59,7 @@ public class MainActivity extends Activity {
         root.addView(title, full());
 
         TextView info = new TextView(this);
-        info.setText("After the daily limit, Android itself blocks non-approved apps with its 'App is not available' message. There is no daily-limit page anymore. System apps, Maps, BudapestGO and guardian-approved apps remain available. AdGuard uninstall protection stays active independently of screen-time protection.");
+        info.setText("After the daily limit, Android itself blocks non-approved apps with its 'App is not available' message. There is no daily-limit page anymore. The phone/launcher, Maps, BudapestGO and guardian-approved apps remain available. Preinstalled launchable apps can also be chosen explicitly. AdGuard uninstall protection stays active independently of screen-time protection.");
         info.setTextSize(16);
         root.addView(info, full());
 
@@ -232,11 +232,8 @@ public class MainActivity extends Activity {
         ArrayList<ApplicationInfo> candidates = new ArrayList<>();
 
         for (ApplicationInfo app : installed) {
-            boolean system = (app.flags & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
-            if (system) continue;
-            if (app.packageName.equals(getPackageName())) continue;
             if (PolicyUtils.isAlwaysBlockedPackage(app.packageName)) continue;
-            if (PolicyUtils.isBuiltInAllowedPackage(app.packageName)) continue;
+            if (PolicyUtils.isAutomaticallyAllowedVisiblePackage(this, app.packageName)) continue;
             if (pm.getLaunchIntentForPackage(app.packageName) == null) continue;
             candidates.add(app);
         }
