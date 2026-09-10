@@ -70,6 +70,19 @@ public final class PolicyUtils {
         return i!=null && (i.flags&f)!=0;
     }
 
+    public static Set<String> getUserAllowedPackages(Context c) {
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        PackageManager pm = c.getPackageManager();
+
+        for (String pkg : BASE_ALLOWED_AFTER_LIMIT) {
+            if (!BLOCKED.contains(pkg) && pm.getLaunchIntentForPackage(pkg) != null) result.add(pkg);
+        }
+        for (String pkg : Prefs.getExtraAllowedPackages(c)) {
+            if (!BLOCKED.contains(pkg) && pm.getLaunchIntentForPackage(pkg) != null) result.add(pkg);
+        }
+        return result;
+    }
+
     public static void prepareRestrictedLockTask(Context c) {
         if (!isDeviceOwner(c)) return;
         LinkedHashSet<String> allowed=new LinkedHashSet<>();
@@ -84,6 +97,16 @@ public final class PolicyUtils {
             if(system(i) && !BLOCKED.contains(i.packageName)) allowed.add(i.packageName);
             if(BASE_ALLOWED_AFTER_LIMIT.contains(i.packageName)) allowed.add(i.packageName);
             if(extraAllowed.contains(i.packageName) && !BLOCKED.contains(i.packageName)) allowed.add(i.packageName);
+        }
+
+        // Package visibility on some OEM builds can make getInstalledApplications incomplete.
+        // Add the explicitly saved packages again so guardian-selected apps are never lost
+        // from the lock-task allowlist just because Android omitted them from that query.
+        for (String pkg : BASE_ALLOWED_AFTER_LIMIT) {
+            if (!BLOCKED.contains(pkg) && pm.getLaunchIntentForPackage(pkg) != null) allowed.add(pkg);
+        }
+        for (String pkg : extraAllowed) {
+            if (!BLOCKED.contains(pkg) && pm.getLaunchIntentForPackage(pkg) != null) allowed.add(pkg);
         }
 
         TelecomManager tm=(TelecomManager)c.getSystemService(Context.TELECOM_SERVICE);
@@ -102,6 +125,35 @@ public final class PolicyUtils {
                 f |= DevicePolicyManager.LOCK_TASK_FEATURE_BLOCK_ACTIVITY_START_IN_TASK;
             }
             d.setLockTaskFeatures(a,f);
+        }
+    }
+
+    public static boolean launchAllowedApp(Context c, String packageName) {
+        if (!isDeviceOwner(c) || BLOCKED.contains(packageName)) return false;
+        if (!getUserAllowedPackages(c).contains(packageName)) return false;
+
+        prepareRestrictedLockTask(c);
+        PackageManager pm = c.getPackageManager();
+        Intent launch = pm.getLaunchIntentForPackage(packageName);
+        if (launch == null) return false;
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                ActivityOptions options = ActivityOptions.makeBasic();
+                options.setLockTaskEnabled(true);
+                c.startActivity(launch, options.toBundle());
+            } else {
+                c.startActivity(launch);
+            }
+            return true;
+        } catch (Exception first) {
+            try {
+                c.startActivity(launch);
+                return true;
+            } catch (Exception ignored) {
+                return false;
+            }
         }
     }
 
