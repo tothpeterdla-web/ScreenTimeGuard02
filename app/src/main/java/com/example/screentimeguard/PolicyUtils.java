@@ -31,8 +31,8 @@ public final class PolicyUtils {
             "com.amazon.venezia","com.oppo.market","com.heytap.market","com.bbk.appstore",
             "com.vivo.appstore"));
 
-    // Third-party apps that remain usable after the daily limit is reached.
-    private static final Set<String> ALLOWED_AFTER_LIMIT = new HashSet<>(Arrays.asList(
+    // Third-party apps that always remain usable after the daily limit is reached.
+    private static final Set<String> BASE_ALLOWED_AFTER_LIMIT = new HashSet<>(Arrays.asList(
             "com.google.android.apps.maps",   // Google Maps
             "hu.webvalto.bkkfutar"           // BudapestGO
     ));
@@ -40,16 +40,15 @@ public final class PolicyUtils {
     public static ComponentName admin(Context c) { return new ComponentName(c, GuardDeviceAdminReceiver.class); }
     public static DevicePolicyManager dpm(Context c) { return (DevicePolicyManager)c.getSystemService(Context.DEVICE_POLICY_SERVICE); }
     public static boolean isDeviceOwner(Context c) { DevicePolicyManager d=dpm(c); return d!=null && d.isDeviceOwnerApp(c.getPackageName()); }
+    public static boolean isAlwaysBlockedPackage(String packageName) { return BLOCKED.contains(packageName); }
+    public static boolean isBuiltInAllowedPackage(String packageName) { return BASE_ALLOWED_AFTER_LIMIT.contains(packageName); }
 
     public static void applyPersistentPolicies(Context c) {
         if (!isDeviceOwner(c)) return;
         DevicePolicyManager d=dpm(c); ComponentName a=admin(c);
         d.setUninstallBlocked(a,c.getPackageName(),true);
 
-        // AdGuard provides the always-on Family Protection DNS filtering on this device.
-        // When strong protection is enabled, prevent it from being uninstalled through
-        // normal Android package-management paths. DISALLOW_APPS_CONTROL below also blocks
-        // force-stop, clear-data and disable actions in Settings.
+        // AdGuard provides Family Protection DNS filtering on this device.
         try { d.setUninstallBlocked(a,ADGUARD_PACKAGE,true); } catch(Exception ignored) {}
 
         try { d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_DATE_TIME); } catch(Exception ignored) {}
@@ -77,12 +76,14 @@ public final class PolicyUtils {
         allowed.add(c.getPackageName());
         PackageManager pm=c.getPackageManager();
         List<ApplicationInfo> apps=pm.getInstalledApplications(PackageManager.MATCH_ALL);
+        Set<String> extraAllowed=Prefs.getExtraAllowedPackages(c);
 
-        // Keep Android system apps usable (except browsers/app stores), plus the explicit
-        // travel/navigation exceptions requested for restricted mode.
+        // Keep Android system apps usable (except browsers/app stores), plus built-in and
+        // guardian-selected third-party exceptions such as banking apps.
         for(ApplicationInfo i:apps) {
             if(system(i) && !BLOCKED.contains(i.packageName)) allowed.add(i.packageName);
-            if(ALLOWED_AFTER_LIMIT.contains(i.packageName)) allowed.add(i.packageName);
+            if(BASE_ALLOWED_AFTER_LIMIT.contains(i.packageName)) allowed.add(i.packageName);
+            if(extraAllowed.contains(i.packageName) && !BLOCKED.contains(i.packageName)) allowed.add(i.packageName);
         }
 
         TelecomManager tm=(TelecomManager)c.getSystemService(Context.TELECOM_SERVICE);
@@ -97,9 +98,6 @@ public final class PolicyUtils {
                     DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS |
                     DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD;
 
-            // Android 11+ can otherwise allow a non-allowlisted activity to be launched
-            // into an already-allowed locked task (for example from the launcher). Block
-            // those activity starts so third-party apps really stay inaccessible.
             if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R) {
                 f |= DevicePolicyManager.LOCK_TASK_FEATURE_BLOCK_ACTIVITY_START_IN_TASK;
             }
