@@ -8,6 +8,8 @@ public class GuardDeviceAdminReceiver extends DeviceAdminReceiver {
     @Override
     public void onEnabled(Context context, Intent intent) {
         super.onEnabled(context, intent);
-        if (PolicyUtils.isDeviceOwner(context)) PolicyUtils.applyPersistentPolicies(context);
+        if (PolicyUtils.isDeviceOwner(context)) {
+            PolicyUtils.applyAdGuardProtection(context);
+        }
     }
 }
