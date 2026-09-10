@@ -113,6 +113,36 @@ public final class PolicyUtils {
         return i != null && (i.flags & flags) != 0;
     }
 
+    private static String homePackage(Context c) {
+        try {
+            Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
+            ResolveInfo ri = c.getPackageManager().resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
+            return ri != null && ri.activityInfo != null ? ri.activityInfo.packageName : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String dialerPackage(Context c) {
+        try {
+            TelecomManager tm = (TelecomManager)c.getSystemService(Context.TELECOM_SERVICE);
+            return tm == null ? null : tm.getDefaultDialerPackage();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    // Visible apps that are always usable and therefore should not appear as guardian choices.
+    public static boolean isAutomaticallyAllowedVisiblePackage(Context c, String packageName) {
+        if (packageName == null) return false;
+        if (packageName.equals(c.getPackageName())) return true;
+        if (BUILT_IN_ALLOWED_AFTER_LIMIT.contains(packageName)) return true;
+        String home = homePackage(c);
+        if (packageName.equals(home)) return true;
+        String dialer = dialerPackage(c);
+        return packageName.equals(dialer);
+    }
+
     public static Set<String> getUserAllowedPackages(Context c) {
         LinkedHashSet<String> result = new LinkedHashSet<>();
         PackageManager pm = c.getPackageManager();
@@ -133,27 +163,30 @@ public final class PolicyUtils {
         allowed.add(c.getPackageName());
 
         List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.MATCH_ALL);
-        Set<String> extraAllowed = Prefs.getExtraAllowedPackages(c);
+
+        // Keep non-launchable Android/OEM infrastructure available so core phone behavior is
+        // not broken. Launchable preinstalled apps are NOT automatically allowed anymore:
+        // they must be selected by the guardian just like normal apps. This fixes devices
+        // where Facebook/Instagram/Messenger are shipped as system or updated-system apps.
         for (ApplicationInfo app : apps) {
-            if (system(app) && !ALWAYS_BLOCKED.contains(app.packageName)) allowed.add(app.packageName);
-            if (BUILT_IN_ALLOWED_AFTER_LIMIT.contains(app.packageName)) allowed.add(app.packageName);
-            if (extraAllowed.contains(app.packageName) && !ALWAYS_BLOCKED.contains(app.packageName)) {
+            if (system(app)
+                    && !ALWAYS_BLOCKED.contains(app.packageName)
+                    && pm.getLaunchIntentForPackage(app.packageName) == null) {
                 allowed.add(app.packageName);
             }
         }
 
-        // Add guardian-selected apps explicitly as a safeguard against OEM package-query quirks.
+        // Maps, BudapestGO and every guardian-selected launchable app.
         allowed.addAll(getUserAllowedPackages(c));
 
-        // Explicitly keep the current launcher and dialer available.
-        try {
-            Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
-            ResolveInfo ri = pm.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
-            if (ri != null && ri.activityInfo != null) allowed.add(ri.activityInfo.packageName);
-        } catch (Exception ignored) {}
+        // The launcher must remain available so blocked apps can show Android's own
+        // "App is not available" message when their icon is tapped.
+        String home = homePackage(c);
+        if (home != null) allowed.add(home);
 
-        TelecomManager tm = (TelecomManager)c.getSystemService(Context.TELECOM_SERVICE);
-        if (tm != null && tm.getDefaultDialerPackage() != null) allowed.add(tm.getDefaultDialerPackage());
+        // Calls must always remain possible.
+        String dialer = dialerPackage(c);
+        if (dialer != null) allowed.add(dialer);
 
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
@@ -167,8 +200,6 @@ public final class PolicyUtils {
                     | DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS
                     | DevicePolicyManager.LOCK_TASK_FEATURE_KEYGUARD;
 
-            // This is what makes a tap on a blocked launcher icon produce Android's
-            // own "App is not available" behavior instead of opening the app in the locked task.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 features |= DevicePolicyManager.LOCK_TASK_FEATURE_BLOCK_ACTIVITY_START_IN_TASK;
             }
