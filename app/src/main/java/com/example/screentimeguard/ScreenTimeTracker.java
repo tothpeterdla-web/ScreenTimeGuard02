@@ -1,16 +1,15 @@
 package com.example.screentimeguard;
 
 import android.app.AppOpsManager;
-import android.app.usage.UsageEvents;
+import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.os.Process;
 
 import java.time.ZonedDateTime;
+import java.util.Map;
 
 public final class ScreenTimeTracker {
-    private static final long LOOKBACK_MS = 24L * 60L * 60L * 1000L;
-
     private ScreenTimeTracker() {}
 
     public static boolean hasUsageAccess(Context context) {
@@ -37,56 +36,30 @@ public final class ScreenTimeTracker {
 
         long now = System.currentTimeMillis();
         long start = startOfTodayMillis();
-        long queryStart = Math.max(0L, start - LOOKBACK_MS);
 
         UsageStatsManager usm =
                 (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
         if (usm == null) return -1L;
 
-        UsageEvents events = usm.queryEvents(queryStart, now);
-        if (events == null) return -1L;
+        // Use Android's aggregated foreground-app usage instead of trying to reconstruct
+        // screen-on time from SCREEN_INTERACTIVE / SCREEN_NON_INTERACTIVE events.
+        // Some devices (including the Zenfone 8) can omit/misorder those screen events,
+        // which made the previous implementation count several hours while the screen was off.
+        Map<String, UsageStats> stats = usm.queryAndAggregateUsageStats(start, now);
+        if (stats == null) return -1L;
 
-        boolean interactive = false;
-        long activeStart = -1L;
         long total = 0L;
-
-        UsageEvents.Event event = new UsageEvents.Event();
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event);
-            int type = event.getEventType();
-            long ts = event.getTimeStamp();
-
-            if (type != UsageEvents.Event.SCREEN_INTERACTIVE
-                    && type != UsageEvents.Event.SCREEN_NON_INTERACTIVE) continue;
-
-            if (ts < start) {
-                interactive = type == UsageEvents.Event.SCREEN_INTERACTIVE;
-                continue;
-            }
-
-            if (type == UsageEvents.Event.SCREEN_INTERACTIVE) {
-                if (!interactive) {
-                    interactive = true;
-                    activeStart = Math.max(start, ts);
-                } else if (activeStart < 0L) {
-                    activeStart = start;
-                }
-            } else {
-                if (interactive) {
-                    long from = activeStart >= 0L ? activeStart : start;
-                    if (ts > from) total += ts - from;
-                }
-                interactive = false;
-                activeStart = -1L;
-            }
+        for (UsageStats s : stats.values()) {
+            if (s == null) continue;
+            long foreground = s.getTotalTimeInForeground();
+            if (foreground > 0L) total += foreground;
         }
 
-        if (interactive) {
-            long from = activeStart >= 0L ? activeStart : start;
-            if (now > from) total += now - from;
-        }
-
-        return Math.max(0L, total);
+        // Aggregated per-app data can overlap slightly on some Android builds (for example
+        // during activity transitions or split-screen). Never allow the result to exceed
+        // the amount of real time that has elapsed since midnight.
+        long elapsedToday = Math.max(0L, now - start);
+        return Math.max(0L, Math.min(total, elapsedToday));
     }
 
     public static String formatDuration(long millis) {
