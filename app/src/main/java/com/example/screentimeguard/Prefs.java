@@ -58,6 +58,12 @@ public final class Prefs {
         prefs(context).edit().remove(KEY_OVERRIDE_UNTIL).apply();
     }
 
+    public static void unlockForMinutes(Context context, int minutes) {
+        long duration = Math.max(1, minutes) * 60_000L;
+        prefs(context).edit().putLong(KEY_OVERRIDE_UNTIL,
+                System.currentTimeMillis() + duration).apply();
+    }
+
     public static void unlockUntilMidnight(Context context) {
         ZonedDateTime now = ZonedDateTime.now();
         ZonedDateTime nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(now.getZone());
