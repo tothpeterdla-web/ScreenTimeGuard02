@@ -15,12 +15,13 @@ import android.os.Looper;
 public class ScreenTimeService extends Service {
     private static final String CHANNEL = "screen_time_guard";
     private static final int ID = 1001;
+    private static final long POLL_MS = 5_000L;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private final Runnable poll = new Runnable() {
         @Override public void run() {
             tick();
-            handler.postDelayed(this, 15000L);
+            handler.postDelayed(this, POLL_MS);
         }
     };
 
@@ -31,7 +32,7 @@ public class ScreenTimeService extends Service {
             if (nm != null) {
                 NotificationChannel channel = new NotificationChannel(
                         CHANNEL, "Screen Time Guard", NotificationManager.IMPORTANCE_LOW);
-                channel.setDescription("Shows today's used and remaining screen time.");
+                channel.setDescription("Shows today's locally measured unlocked screen time.");
                 nm.createNotificationChannel(channel);
             }
         }
@@ -54,14 +55,17 @@ public class ScreenTimeService extends Service {
 
         boolean owner = PolicyUtils.isDeviceOwner(this);
         boolean enabled = Prefs.isEnabled(this);
-        boolean usageAccess = ScreenTimeTracker.hasUsageAccess(this);
         boolean override = Prefs.isOverrideActive(this);
+        long used = ScreenTimeTracker.sample(this);
+        long limit = Prefs.getLimitMinutes(this) * 60_000L;
+        long remaining = Math.max(0L, limit - used);
+        String counter = "Used: " + ScreenTimeTracker.formatDuration(used)
+                + " · Remaining: " + ScreenTimeTracker.formatDuration(remaining);
 
-        // Recovery invariant: never leave the phone trapped. Restricted mode is immediately
-        // cleared if protection is disabled, Device Owner is gone, a guardian override is
-        // active, Usage Access disappears, or the guardian package is no longer permitted.
+        // Safety invariant: never leave restricted mode active when protection is disabled,
+        // Device Owner is gone, guardian override is active, or our own package is not permitted.
         if (PolicyUtils.isRestrictedModeActive(this)) {
-            if (!owner || !enabled || override || !usageAccess) {
+            if (!owner || !enabled || override) {
                 PolicyUtils.clearRestrictedMode(this);
             } else {
                 try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
@@ -73,25 +77,13 @@ public class ScreenTimeService extends Service {
 
         if (!enabled) {
             if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            if (!usageAccess) {
-                update("Usage Access missing · screen-time protection is off");
-                return;
-            }
-            long used = ScreenTimeTracker.getTodayInteractiveMillis(this);
-            if (used < 0L) {
-                update("Unable to read today's screen time");
-                return;
-            }
-            long limit = Prefs.getLimitMinutes(this) * 60000L;
-            long remaining = Math.max(0L, limit - used);
-            update("Used: " + ScreenTimeTracker.formatDuration(used)
-                    + " · Remaining: " + ScreenTimeTracker.formatDuration(remaining));
+            update(counter + " · protection off");
             return;
         }
 
         if (!owner) {
             if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            update("Protection enabled · Device Owner not active");
+            update(counter + " · Device Owner not active");
             return;
         }
 
@@ -99,32 +91,9 @@ public class ScreenTimeService extends Service {
 
         if (override) {
             if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            update("Guardian override until midnight");
+            update(counter + " · guardian override until midnight");
             return;
         }
-
-        // SAFETY OVER ANTI-BYPASS: Android does not provide a Device Owner API that can make
-        // Usage Access untoggleable. The previous fail-closed behavior could trap the phone.
-        // Therefore missing/unreadable Usage Access now always clears restricted mode and
-        // leaves a visible warning. Strong protection remains marked enabled, so the guardian
-        // can restore Usage Access without losing configuration.
-        if (!usageAccess) {
-            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            update("Usage Access missing · restore it to resume screen-time enforcement");
-            return;
-        }
-
-        long used = ScreenTimeTracker.getTodayInteractiveMillis(this);
-        if (used < 0L) {
-            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            update("Usage data unavailable · restriction suspended for safety");
-            return;
-        }
-
-        long limit = Prefs.getLimitMinutes(this) * 60000L;
-        long remaining = Math.max(0L, limit - used);
-        String counter = "Used: " + ScreenTimeTracker.formatDuration(used)
-                + " · Remaining: " + ScreenTimeTracker.formatDuration(remaining);
 
         if (used >= limit) {
             try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
