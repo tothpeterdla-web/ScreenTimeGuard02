@@ -51,6 +51,16 @@ public final class PolicyUtils {
         return d != null && d.isDeviceOwnerApp(c.getPackageName());
     }
 
+    public static boolean isGuardianLockTaskPermitted(Context c) {
+        if (!isDeviceOwner(c)) return false;
+        try {
+            DevicePolicyManager d = dpm(c);
+            return d != null && d.isLockTaskPermitted(c.getPackageName());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public static boolean isAlwaysBlockedPackage(String packageName) {
         return ALWAYS_BLOCKED.contains(packageName);
     }
@@ -160,14 +170,16 @@ public final class PolicyUtils {
 
         PackageManager pm = c.getPackageManager();
         LinkedHashSet<String> allowed = new LinkedHashSet<>();
+
+        // SAFETY INVARIANT: the guardian package is always first in the allowlist.
+        // If Android ever refuses to confirm that this package is permitted, restricted mode
+        // will not be entered (or will be cleared by the monitor service).
         allowed.add(c.getPackageName());
 
         List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.MATCH_ALL);
 
         // Keep non-launchable Android/OEM infrastructure available so core phone behavior is
-        // not broken. Launchable preinstalled apps are NOT automatically allowed anymore:
-        // they must be selected by the guardian just like normal apps. This fixes devices
-        // where Facebook/Instagram/Messenger are shipped as system or updated-system apps.
+        // not broken. Launchable preinstalled apps must still be selected by the guardian.
         for (ApplicationInfo app : apps) {
             if (system(app)
                     && !ALWAYS_BLOCKED.contains(app.packageName)
@@ -176,15 +188,11 @@ public final class PolicyUtils {
             }
         }
 
-        // Maps, BudapestGO and every guardian-selected launchable app.
         allowed.addAll(getUserAllowedPackages(c));
 
-        // The launcher must remain available so blocked apps can show Android's own
-        // "App is not available" message when their icon is tapped.
         String home = homePackage(c);
         if (home != null) allowed.add(home);
 
-        // Calls must always remain possible.
         String dialer = dialerPackage(c);
         if (dialer != null) allowed.add(dialer);
 
@@ -218,7 +226,20 @@ public final class PolicyUtils {
 
     public static void enterRestrictedMode(Context c) {
         if (!isDeviceOwner(c) || isRestrictedModeActive(c)) return;
-        prepareRestrictedLockTask(c);
+
+        try {
+            prepareRestrictedLockTask(c);
+        } catch (Exception ignored) {
+            return;
+        }
+
+        // HARD FAIL-SAFE: never start restricted mode unless Android confirms that
+        // Screen Time Guard itself is allowed. This prevents a repeat of the self-lockout.
+        if (!isGuardianLockTaskPermitted(c)) {
+            clearRestrictedMode(c);
+            return;
+        }
+
         Intent i = new Intent(c, LockActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         try {
