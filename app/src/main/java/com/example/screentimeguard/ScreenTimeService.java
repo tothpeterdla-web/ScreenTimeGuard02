@@ -52,14 +52,31 @@ public class ScreenTimeService extends Service {
     private void tick() {
         PolicyUtils.applyAdGuardProtection(this);
 
+        // RECOVERY FIRST. Never leave the phone in restricted mode if the prerequisites
+        // needed to control/recover it are missing. This runs before any early return.
+        if (PolicyUtils.isRestrictedModeActive(this)) {
+            if (!PolicyUtils.isDeviceOwner(this)
+                    || !Prefs.isEnabled(this)
+                    || !ScreenTimeTracker.hasUsageAccess(this)
+                    || Prefs.isOverrideActive(this)) {
+                PolicyUtils.clearRestrictedMode(this);
+            } else {
+                try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
+                if (!PolicyUtils.isGuardianLockTaskPermitted(this)) {
+                    PolicyUtils.clearRestrictedMode(this);
+                }
+            }
+        }
+
         if (!ScreenTimeTracker.hasUsageAccess(this)) {
-            update("Usage Access missing");
+            update("Usage Access missing · restriction disabled");
             return;
         }
 
         long used = ScreenTimeTracker.getTodayInteractiveMillis(this);
         if (used < 0L) {
-            update("Unable to read today's screen time");
+            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
+            update("Unable to read today's screen time · restriction disabled");
             return;
         }
 
@@ -75,6 +92,7 @@ public class ScreenTimeService extends Service {
         }
 
         if (!PolicyUtils.isDeviceOwner(this)) {
+            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
             update(counter + " · Device Owner not active");
             return;
         }
@@ -88,18 +106,21 @@ public class ScreenTimeService extends Service {
         }
 
         if (used >= limit) {
-            // Refresh the Device Owner allowlist on every poll. This makes the restricted
-            // state self-healing after an APK update and guarantees this guardian package,
-            // the launcher/dialer and the guardian-selected apps remain authorized even if
-            // Android retained a stale lock-task package list from an older build.
+            // Refresh the package allowlist before every enforcement check. The guardian app
+            // itself is always included and Android must confirm it is lock-task permitted.
             try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
+
+            if (!PolicyUtils.isGuardianLockTaskPermitted(this)) {
+                if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
+                update("Safety fallback · Screen Time Guard must remain reachable");
+                return;
+            }
 
             update("Daily limit reached · blocked apps are unavailable");
             if (!PolicyUtils.isRestrictedModeActive(this)) {
                 PolicyUtils.enterRestrictedMode(this);
             }
         } else {
-            // Important for midnight: yesterday's restricted mode must not survive into a new day.
             if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
             update(counter);
         }
