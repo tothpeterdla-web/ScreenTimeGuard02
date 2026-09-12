@@ -52,13 +52,15 @@ public class ScreenTimeService extends Service {
     private void tick() {
         PolicyUtils.applyAdGuardProtection(this);
 
-        // RECOVERY FIRST. Never leave the phone in restricted mode if the prerequisites
-        // needed to control/recover it are missing. This runs before any early return.
+        boolean owner = PolicyUtils.isDeviceOwner(this);
+        boolean enabled = Prefs.isEnabled(this);
+        boolean usageAccess = ScreenTimeTracker.hasUsageAccess(this);
+        boolean override = Prefs.isOverrideActive(this);
+
+        // Recovery invariant: if restricted mode is active, Screen Time Guard itself must
+        // remain allowlisted. An active guardian override or disabled protection still exits.
         if (PolicyUtils.isRestrictedModeActive(this)) {
-            if (!PolicyUtils.isDeviceOwner(this)
-                    || !Prefs.isEnabled(this)
-                    || !ScreenTimeTracker.hasUsageAccess(this)
-                    || Prefs.isOverrideActive(this)) {
+            if (!owner || !enabled || override) {
                 PolicyUtils.clearRestrictedMode(this);
             } else {
                 try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
@@ -68,15 +70,60 @@ public class ScreenTimeService extends Service {
             }
         }
 
-        if (!ScreenTimeTracker.hasUsageAccess(this)) {
-            update("Usage Access missing · restriction disabled");
+        if (!enabled) {
+            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
+            if (!usageAccess) {
+                update("Usage Access missing · screen-time protection is off");
+                return;
+            }
+            long used = ScreenTimeTracker.getTodayInteractiveMillis(this);
+            if (used < 0L) {
+                update("Unable to read today's screen time");
+                return;
+            }
+            long limit = Prefs.getLimitMinutes(this) * 60000L;
+            long remaining = Math.max(0L, limit - used);
+            update("Used: " + ScreenTimeTracker.formatDuration(used)
+                    + " · Remaining: " + ScreenTimeTracker.formatDuration(remaining));
+            return;
+        }
+
+        if (!owner) {
+            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
+            update("Protection enabled · Device Owner not active");
+            return;
+        }
+
+        PolicyUtils.applyPersistentPolicies(this);
+
+        if (override) {
+            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
+            update("Guardian override until midnight");
+            return;
+        }
+
+        // ANTI-BYPASS: Usage Access cannot be technically locked by DevicePolicyManager.
+        // Instead, strong protection fails closed. If the user revokes Usage Access while
+        // protection is enabled, restricted mode starts immediately and remains until the
+        // guardian restores access or authorizes an override.
+        if (!usageAccess) {
+            try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
+            if (PolicyUtils.isGuardianLockTaskPermitted(this)
+                    && !PolicyUtils.isRestrictedModeActive(this)) {
+                PolicyUtils.enterRestrictedMode(this);
+            }
+            update("Usage Access removed · guardian action required");
             return;
         }
 
         long used = ScreenTimeTracker.getTodayInteractiveMillis(this);
         if (used < 0L) {
-            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            update("Unable to read today's screen time · restriction disabled");
+            try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
+            if (PolicyUtils.isGuardianLockTaskPermitted(this)
+                    && !PolicyUtils.isRestrictedModeActive(this)) {
+                PolicyUtils.enterRestrictedMode(this);
+            }
+            update("Usage data unavailable · guardian action required");
             return;
         }
 
@@ -85,29 +132,7 @@ public class ScreenTimeService extends Service {
         String counter = "Used: " + ScreenTimeTracker.formatDuration(used)
                 + " · Remaining: " + ScreenTimeTracker.formatDuration(remaining);
 
-        if (!Prefs.isEnabled(this)) {
-            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            update(counter);
-            return;
-        }
-
-        if (!PolicyUtils.isDeviceOwner(this)) {
-            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            update(counter + " · Device Owner not active");
-            return;
-        }
-
-        PolicyUtils.applyPersistentPolicies(this);
-
-        if (Prefs.isOverrideActive(this)) {
-            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            update(counter + " · Guardian override until midnight");
-            return;
-        }
-
         if (used >= limit) {
-            // Refresh the package allowlist before every enforcement check. The guardian app
-            // itself is always included and Android must confirm it is lock-task permitted.
             try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
 
             if (!PolicyUtils.isGuardianLockTaskPermitted(this)) {
