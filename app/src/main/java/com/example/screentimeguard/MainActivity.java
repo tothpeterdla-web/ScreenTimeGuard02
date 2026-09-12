@@ -6,6 +6,7 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -15,6 +16,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -28,21 +30,52 @@ public class MainActivity extends Activity {
     private EditText hours;
     private EditText minutes;
 
+    private Button wifiButton;
+    private Button bluetoothButton;
+    private Button mobileDataButton;
+    private Button rotationButton;
+    private TextView brightnessLabel;
+    private SeekBar brightnessBar;
+
+    private boolean usageMaintenanceInProgress = false;
+
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildUi();
         PolicyUtils.applyAdGuardProtection(this);
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 100);
-        }
+        requestRuntimePermissionsIfNeeded();
     }
 
     @Override protected void onResume() {
         super.onResume();
+
+        // Usage Access settings are guardian-only. A short maintenance override keeps the
+        // phone usable while the guardian is inside Settings; it is cleared immediately on return.
+        if (usageMaintenanceInProgress) {
+            usageMaintenanceInProgress = false;
+            if (Prefs.isEnabled(this)) Prefs.clearOverride(this);
+        }
+
         PolicyUtils.applyAdGuardProtection(this);
         refresh();
-        if (ScreenTimeTracker.hasUsageAccess(this)) startMonitorService();
+        if (Prefs.isEnabled(this) || ScreenTimeTracker.hasUsageAccess(this)) startMonitorService();
+    }
+
+    private void requestRuntimePermissionsIfNeeded() {
+        ArrayList<String> needed = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.BLUETOOTH_CONNECT);
+        }
+        if (!needed.isEmpty()) {
+            requestPermissions(needed.toArray(new String[0]), 100);
+        }
     }
 
     private void buildUi() {
@@ -59,7 +92,7 @@ public class MainActivity extends Activity {
         root.addView(title, full());
 
         TextView info = new TextView(this);
-        info.setText("After the daily limit, Android itself blocks non-approved apps with its 'App is not available' message. There is no daily-limit page anymore. The phone/launcher, Maps, BudapestGO and guardian-approved apps remain available. Preinstalled launchable apps can also be chosen explicitly. AdGuard uninstall protection stays active independently of screen-time protection.");
+        info.setText("After the daily limit, Android blocks non-approved apps with its 'App is not available' message. Screen Time Guard stays reachable. Quick controls below replace the Quick Settings panel while restricted. If Usage Access is removed while strong protection is enabled, the phone now fails closed instead of disabling protection. AdGuard uninstall and Settings factory-reset protection stay active independently of screen time.");
         info.setTextSize(16);
         root.addView(info, full());
 
@@ -67,9 +100,51 @@ public class MainActivity extends Activity {
         status.setTextSize(16);
         root.addView(status, full());
 
+        TextView quickTitle = new TextView(this);
+        quickTitle.setText("Quick controls");
+        quickTitle.setTextSize(22);
+        root.addView(quickTitle, full());
+
+        wifiButton = new Button(this);
+        wifiButton.setOnClickListener(v -> toggleWifi());
+        root.addView(wifiButton, full());
+
+        bluetoothButton = new Button(this);
+        bluetoothButton.setOnClickListener(v -> toggleBluetooth());
+        root.addView(bluetoothButton, full());
+
+        mobileDataButton = new Button(this);
+        mobileDataButton.setOnClickListener(v -> openInternetPanel());
+        root.addView(mobileDataButton, full());
+
+        brightnessLabel = new TextView(this);
+        brightnessLabel.setTextSize(16);
+        root.addView(brightnessLabel, full());
+
+        brightnessBar = new SeekBar(this);
+        brightnessBar.setMin(1);
+        brightnessBar.setMax(255);
+        brightnessBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                brightnessLabel.setText("Screen brightness: " + Math.round(progress * 100f / 255f) + "%");
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                if (!QuickControls.setBrightness(MainActivity.this, seekBar.getProgress())) {
+                    Toast.makeText(MainActivity.this, "Could not change brightness", Toast.LENGTH_SHORT).show();
+                }
+                refreshQuickControls();
+            }
+        });
+        root.addView(brightnessBar, full());
+
+        rotationButton = new Button(this);
+        rotationButton.setOnClickListener(v -> toggleAutoRotation());
+        root.addView(rotationButton, full());
+
         Button usage = new Button(this);
-        usage.setText("Open Usage Access settings");
-        usage.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
+        usage.setText("Usage Access settings (guardian PIN)");
+        usage.setOnClickListener(v -> requirePin(this::openUsageAccessSettings));
         root.addView(usage, full());
 
         LinearLayout row = new LinearLayout(this);
@@ -114,10 +189,10 @@ public class MainActivity extends Activity {
         root.addView(disable, full());
 
         Button reapplyAdGuard = new Button(this);
-        reapplyAdGuard.setText("Reapply AdGuard uninstall protection");
+        reapplyAdGuard.setText("Reapply AdGuard / anti-reset protection");
         reapplyAdGuard.setOnClickListener(v -> {
             PolicyUtils.applyAdGuardProtection(this);
-            Toast.makeText(this, "AdGuard protection reapplied", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Protection reapplied", Toast.LENGTH_SHORT).show();
             refresh();
         });
         root.addView(reapplyAdGuard, full());
@@ -143,12 +218,120 @@ public class MainActivity extends Activity {
                 + "\nGuardian PIN: " + yn(PinStore.hasPin(this))
                 + "\nAdGuard installed: " + yn(PolicyUtils.isAdGuardInstalled(this))
                 + "\nAdGuard uninstall blocked: " + yn(PolicyUtils.isAdGuardUninstallBlocked(this))
+                + "\nFactory reset blocked in Settings: " + yn(PolicyUtils.isFactoryResetBlocked(this))
                 + "\nProtection enabled: " + yn(Prefs.isEnabled(this))
+                + "\nUsage Access anti-bypass: " + (Prefs.isEnabled(this) ? "ARMED" : "OFF")
                 + "\nRestricted mode active: " + yn(PolicyUtils.isRestrictedModeActive(this))
                 + "\nExtra apps allowed after limit: " + Prefs.getExtraAllowedPackages(this).size()
                 + "\nToday's screen time: " + ScreenTimeTracker.formatDuration(used)
                 + "\nRemaining today: " + ScreenTimeTracker.formatDuration(remaining)
                 + "\n");
+
+        refreshQuickControls();
+    }
+
+    private void refreshQuickControls() {
+        if (wifiButton == null) return;
+        wifiButton.setText("Internet (Wi-Fi): " + (QuickControls.isWifiEnabled(this) ? "ON" : "OFF"));
+
+        if (!QuickControls.hasBluetoothPermission(this)) {
+            bluetoothButton.setText("Bluetooth: permission required");
+        } else {
+            bluetoothButton.setText("Bluetooth: " + (QuickControls.isBluetoothEnabled(this) ? "ON" : "OFF"));
+        }
+
+        Boolean mobile = QuickControls.isMobileDataEnabled(this);
+        mobileDataButton.setText("Mobile data: " + (mobile == null ? "unknown" : (mobile ? "ON" : "OFF"))
+                + " · open Internet panel");
+
+        int brightness = QuickControls.getBrightness(this);
+        brightnessBar.setProgress(brightness);
+        brightnessLabel.setText("Screen brightness: " + Math.round(brightness * 100f / 255f) + "%");
+
+        if (QuickControls.canWriteRotation(this)) {
+            rotationButton.setText("Auto rotation: "
+                    + (QuickControls.isAutoRotateEnabled(this) ? "ON" : "OFF"));
+        } else {
+            rotationButton.setText("Auto rotation: grant one-time control permission");
+        }
+    }
+
+    private void toggleWifi() {
+        boolean target = !QuickControls.isWifiEnabled(this);
+        boolean ok = QuickControls.setWifiEnabled(this, target);
+        Toast.makeText(this, ok ? "Wi-Fi changing…" : "Could not change Wi-Fi",
+                Toast.LENGTH_SHORT).show();
+        wifiButton.postDelayed(this::refreshQuickControls, 700L);
+    }
+
+    private void toggleBluetooth() {
+        if (!QuickControls.hasBluetoothPermission(this)) {
+            requestRuntimePermissionsIfNeeded();
+            Toast.makeText(this, "Allow Nearby devices, then tap Bluetooth again",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        boolean target = !QuickControls.isBluetoothEnabled(this);
+        boolean ok = QuickControls.setBluetoothEnabled(this, target);
+        Toast.makeText(this, ok ? "Bluetooth changing…" : "Could not change Bluetooth",
+                Toast.LENGTH_SHORT).show();
+        bluetoothButton.postDelayed(this::refreshQuickControls, 900L);
+    }
+
+    private void openInternetPanel() {
+        try {
+            Intent i;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                i = new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY);
+            } else {
+                i = new Intent(Settings.ACTION_WIRELESS_SETTINGS);
+            }
+            startActivity(i);
+        } catch (Exception e) {
+            msg("Mobile data control unavailable",
+                    "Android does not give Device Owner apps permission to directly toggle cellular data. The Internet panel could not be opened on this device.");
+        }
+    }
+
+    private void toggleAutoRotation() {
+        if (!QuickControls.canWriteRotation(this)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("One-time rotation permission")
+                    .setMessage("Android requires the 'Modify system settings' permission for Screen Time Guard to toggle auto rotation. Grant it once before relying on this control in restricted mode.")
+                    .setPositiveButton("Open permission", (d, w) -> {
+                        try {
+                            Intent i = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                                    Uri.parse("package:" + getPackageName()));
+                            startActivity(i);
+                        } catch (Exception e) {
+                            Toast.makeText(this, "Could not open permission setting", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+            return;
+        }
+        boolean target = !QuickControls.isAutoRotateEnabled(this);
+        if (!QuickControls.setAutoRotateEnabled(this, target)) {
+            Toast.makeText(this, "Could not change auto rotation", Toast.LENGTH_SHORT).show();
+        }
+        refreshQuickControls();
+    }
+
+    private void openUsageAccessSettings() {
+        boolean maintenance = Prefs.isEnabled(this);
+        if (maintenance) {
+            Prefs.unlockForMinutes(this, 5);
+            PolicyUtils.guardianExitRestrictedMode(this);
+            usageMaintenanceInProgress = true;
+        }
+        try {
+            startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
+        } catch (Exception e) {
+            if (maintenance) Prefs.clearOverride(this);
+            usageMaintenanceInProgress = false;
+            Toast.makeText(this, "Could not open Usage Access settings", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void startMonitorService() {
@@ -188,7 +371,9 @@ public class MainActivity extends Activity {
         PolicyUtils.guardianExitRestrictedMode(this);
         PolicyUtils.removeScreenTimePolicies(this);
         PolicyUtils.applyAdGuardProtection(this);
-        Toast.makeText(this, "Screen-time protection disabled; AdGuard remains protected", Toast.LENGTH_LONG).show();
+        Toast.makeText(this,
+                "Screen-time protection disabled; AdGuard and Settings factory-reset protection remain active",
+                Toast.LENGTH_LONG).show();
         refresh();
     }
 
@@ -205,7 +390,8 @@ public class MainActivity extends Activity {
         PolicyUtils.guardianExitRestrictedMode(this);
         boolean ok = PolicyUtils.releaseDeviceOwnerForUninstall(this);
         Toast.makeText(this,
-                ok ? "Device Owner released; uninstall is allowed" : "Release failed; factory reset may be required",
+                ok ? "Device Owner released; uninstall and Settings factory reset are allowed"
+                        : "Release failed; recovery may be required",
                 Toast.LENGTH_LONG).show();
         refresh();
     }
@@ -218,7 +404,7 @@ public class MainActivity extends Activity {
             if (h < 0 || m < 0 || m > 59 || total < 1) throw new Exception();
             Prefs.setLimitMinutes(this, total);
             Prefs.clearOverride(this);
-            if (ScreenTimeTracker.hasUsageAccess(this)) startMonitorService();
+            startMonitorService();
             Toast.makeText(this, "Daily limit saved", Toast.LENGTH_SHORT).show();
             refresh();
         } catch (Exception e) {
