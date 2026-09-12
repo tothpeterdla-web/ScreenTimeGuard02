@@ -10,7 +10,10 @@ public class BootReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         PolicyUtils.applyAdGuardProtection(context);
 
-        if (!ScreenTimeTracker.hasUsageAccess(context)) return;
+        // If strong protection is enabled, the service must start even when Usage Access was
+        // revoked so it can fail closed instead of treating the missing access as a bypass.
+        if (!Prefs.isEnabled(context) && !ScreenTimeTracker.hasUsageAccess(context)) return;
+
         Intent service = new Intent(context, ScreenTimeService.class);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(service);
