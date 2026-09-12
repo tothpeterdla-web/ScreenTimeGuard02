@@ -1,81 +1,81 @@
 package com.example.screentimeguard;
 
-import android.app.AppOpsManager;
-import android.app.usage.UsageEvents;
-import android.app.usage.UsageStatsManager;
+import android.app.KeyguardManager;
 import android.content.Context;
-import android.os.Process;
+import android.content.SharedPreferences;
+import android.os.PowerManager;
 
-import java.time.ZonedDateTime;
-import java.util.HashSet;
-import java.util.Set;
+import java.time.LocalDate;
 
 public final class ScreenTimeTracker {
-    private static final long LOOKBACK_MS = 24L * 60L * 60L * 1000L;
+    private static final String PREFS = "local_screen_time_tracker";
+    private static final String KEY_DATE = "date";
+    private static final String KEY_TOTAL = "total_ms";
+    private static final String KEY_LAST_SAMPLE = "last_sample_ms";
+    private static final long MAX_SAMPLE_GAP_MS = 60_000L;
 
     private ScreenTimeTracker() {}
 
-    public static boolean hasUsageAccess(Context context) {
-        AppOpsManager appOps = (AppOpsManager)context.getSystemService(Context.APP_OPS_SERVICE);
-        if (appOps == null) return false;
-        int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.getPackageName());
-        return mode == AppOpsManager.MODE_ALLOWED;
+    private static SharedPreferences prefs(Context c) {
+        return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    public static long startOfTodayMillis() {
-        ZonedDateTime now = ZonedDateTime.now();
-        return now.toLocalDate().atStartOfDay(now.getZone()).toInstant().toEpochMilli();
+    private static String todayKey() {
+        return LocalDate.now().toString();
     }
 
-    private static String activityKey(UsageEvents.Event event) {
-        String pkg = event.getPackageName();
-        String cls = event.getClassName();
-        return (pkg == null ? "" : pkg) + "\n" + (cls == null ? "" : cls);
+    private static boolean isActivelyUsed(Context c) {
+        PowerManager pm = (PowerManager)c.getSystemService(Context.POWER_SERVICE);
+        KeyguardManager km = (KeyguardManager)c.getSystemService(Context.KEYGUARD_SERVICE);
+        boolean interactive = pm != null && pm.isInteractive();
+        boolean locked = km != null && km.isKeyguardLocked();
+        return interactive && !locked;
     }
 
-    @SuppressWarnings("deprecation")
-    public static long getTodayInteractiveMillis(Context context) {
-        if (!hasUsageAccess(context)) return -1L;
-
+    public static synchronized long sample(Context c) {
+        SharedPreferences p = prefs(c);
+        String today = todayKey();
+        String storedDate = p.getString(KEY_DATE, "");
         long now = System.currentTimeMillis();
-        long start = startOfTodayMillis();
-        long queryStart = Math.max(0L, start - LOOKBACK_MS);
-        UsageStatsManager usm = (UsageStatsManager)context.getSystemService(Context.USAGE_STATS_SERVICE);
-        if (usm == null) return -1L;
-        UsageEvents events = usm.queryEvents(queryStart, now);
-        if (events == null) return -1L;
 
-        Set<String> activeActivities = new HashSet<>();
-        long total = 0L;
-        long cursor = start;
-        UsageEvents.Event event = new UsageEvents.Event();
-
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event);
-            long ts = event.getTimeStamp();
-            int type = event.getEventType();
-            boolean resumed = type == UsageEvents.Event.MOVE_TO_FOREGROUND;
-            boolean paused = type == UsageEvents.Event.MOVE_TO_BACKGROUND;
-            boolean screenOff = type == UsageEvents.Event.SCREEN_NON_INTERACTIVE;
-
-            if (ts < start) {
-                if (resumed) activeActivities.add(activityKey(event));
-                else if (paused) activeActivities.remove(activityKey(event));
-                else if (screenOff) activeActivities.clear();
-                continue;
-            }
-
-            if (ts > cursor && !activeActivities.isEmpty()) total += ts - cursor;
-            if (ts > cursor) cursor = ts;
-
-            if (resumed) activeActivities.add(activityKey(event));
-            else if (paused) activeActivities.remove(activityKey(event));
-            else if (screenOff) activeActivities.clear();
+        if (!today.equals(storedDate)) {
+            p.edit()
+                    .putString(KEY_DATE, today)
+                    .putLong(KEY_TOTAL, 0L)
+                    .putLong(KEY_LAST_SAMPLE, now)
+                    .apply();
+            return 0L;
         }
 
-        if (now > cursor && !activeActivities.isEmpty()) total += now - cursor;
-        long elapsedToday = Math.max(0L, now - start);
-        return Math.max(0L, Math.min(total, elapsedToday));
+        long total = Math.max(0L, p.getLong(KEY_TOTAL, 0L));
+        long last = p.getLong(KEY_LAST_SAMPLE, 0L);
+        long delta = last > 0L ? now - last : 0L;
+
+        // Only count short, continuously observed intervals while the phone is both
+        // interactive and unlocked. A long gap (service stopped/rebooted) is never guessed.
+        if (delta > 0L && delta <= MAX_SAMPLE_GAP_MS && isActivelyUsed(c)) {
+            total += delta;
+        }
+
+        p.edit()
+                .putString(KEY_DATE, today)
+                .putLong(KEY_TOTAL, total)
+                .putLong(KEY_LAST_SAMPLE, now)
+                .apply();
+        return total;
+    }
+
+    public static long getTodayInteractiveMillis(Context c) {
+        return sample(c);
+    }
+
+    public static synchronized void resetToday(Context c) {
+        long now = System.currentTimeMillis();
+        prefs(c).edit()
+                .putString(KEY_DATE, todayKey())
+                .putLong(KEY_TOTAL, 0L)
+                .putLong(KEY_LAST_SAMPLE, now)
+                .apply();
     }
 
     public static String formatDuration(long millis) {
