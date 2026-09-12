@@ -11,6 +11,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.UserManager;
 import android.telecom.TelecomManager;
 
@@ -87,8 +88,19 @@ public final class PolicyUtils {
         }
     }
 
-    // Adult-content protection is independent of the screen-time feature.
-    // AdGuard and this guardian app stay uninstall-blocked whenever Device Owner is active.
+    public static boolean isFactoryResetBlocked(Context c) {
+        if (!isDeviceOwner(c)) return false;
+        try {
+            Bundle restrictions = dpm(c).getUserRestrictions(admin(c));
+            return restrictions != null
+                    && restrictions.getBoolean(UserManager.DISALLOW_FACTORY_RESET, false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // Adult-content protection and the anti-reset policy are independent of screen time.
+    // They stay active whenever this package remains Device Owner.
     public static void applyAdGuardProtection(Context c) {
         if (!isDeviceOwner(c)) return;
         DevicePolicyManager d = dpm(c);
@@ -97,6 +109,7 @@ public final class PolicyUtils {
         if (isAdGuardInstalled(c)) {
             try { d.setUninstallBlocked(a, ADGUARD_PACKAGE, true); } catch (Exception ignored) {}
         }
+        try { d.addUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET); } catch (Exception ignored) {}
     }
 
     public static void applyPersistentPolicies(Context c) {
@@ -115,6 +128,7 @@ public final class PolicyUtils {
         ComponentName a = admin(c);
         try { d.clearUserRestriction(a, UserManager.DISALLOW_CONFIG_DATE_TIME); } catch (Exception ignored) {}
         try { d.clearUserRestriction(a, UserManager.DISALLOW_APPS_CONTROL); } catch (Exception ignored) {}
+        // Deliberately keep factory-reset and AdGuard uninstall protection active.
         applyAdGuardProtection(c);
     }
 
@@ -142,7 +156,6 @@ public final class PolicyUtils {
         }
     }
 
-    // Visible apps that are always usable and therefore should not appear as guardian choices.
     public static boolean isAutomaticallyAllowedVisiblePackage(Context c, String packageName) {
         if (packageName == null) return false;
         if (packageName.equals(c.getPackageName())) return true;
@@ -170,16 +183,9 @@ public final class PolicyUtils {
 
         PackageManager pm = c.getPackageManager();
         LinkedHashSet<String> allowed = new LinkedHashSet<>();
-
-        // SAFETY INVARIANT: the guardian package is always first in the allowlist.
-        // If Android ever refuses to confirm that this package is permitted, restricted mode
-        // will not be entered (or will be cleared by the monitor service).
         allowed.add(c.getPackageName());
 
         List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.MATCH_ALL);
-
-        // Keep non-launchable Android/OEM infrastructure available so core phone behavior is
-        // not broken. Launchable preinstalled apps must still be selected by the guardian.
         for (ApplicationInfo app : apps) {
             if (system(app)
                     && !ALWAYS_BLOCKED.contains(app.packageName)
@@ -233,8 +239,6 @@ public final class PolicyUtils {
             return;
         }
 
-        // HARD FAIL-SAFE: never start restricted mode unless Android confirms that
-        // Screen Time Guard itself is allowed. This prevents a repeat of the self-lockout.
         if (!isGuardianLockTaskPermitted(c)) {
             clearRestrictedMode(c);
             return;
@@ -255,7 +259,6 @@ public final class PolicyUtils {
         }
     }
 
-    // Remove only the temporary restricted mode. AdGuard uninstall protection stays active.
     public static void clearRestrictedMode(Context c) {
         if (!isDeviceOwner(c)) return;
         DevicePolicyManager d = dpm(c);
@@ -285,6 +288,7 @@ public final class PolicyUtils {
             DevicePolicyManager d = dpm(c);
             ComponentName a = admin(c);
             removeScreenTimePolicies(c);
+            try { d.clearUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET); } catch (Exception ignored) {}
             try { d.setUninstallBlocked(a, ADGUARD_PACKAGE, false); } catch (Exception ignored) {}
             try { d.setUninstallBlocked(a, c.getPackageName(), false); } catch (Exception ignored) {}
             d.clearDeviceOwnerApp(c.getPackageName());
