@@ -12,6 +12,8 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.UserManager;
 import android.telecom.TelecomManager;
 
@@ -183,6 +185,8 @@ public final class PolicyUtils {
 
         PackageManager pm = c.getPackageManager();
         LinkedHashSet<String> allowed = new LinkedHashSet<>();
+
+        // Safety invariant: the guardian package must always be allowlisted.
         allowed.add(c.getPackageName());
 
         List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.MATCH_ALL);
@@ -239,12 +243,18 @@ public final class PolicyUtils {
             return;
         }
 
+        // Never enter restricted mode unless Android confirms that Screen Time Guard itself
+        // is lock-task permitted.
         if (!isGuardianLockTaskPermitted(c)) {
             clearRestrictedMode(c);
             return;
         }
 
-        Intent i = new Intent(c, LockActivity.class)
+        // IMPORTANT: MainActivity itself is now the lock-task host. Previously LockActivity
+        // owned the lock-task session and the launcher could still refuse to open MainActivity
+        // on this ASUS build. Making the actual launcher activity the host means tapping the
+        // Screen Time Guard icon brings the already-authorized task back to the foreground.
+        Intent i = new Intent(c, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -254,8 +264,14 @@ public final class PolicyUtils {
             } else {
                 c.startActivity(i);
             }
+
+            // Show the normal launcher after the guardian task has entered lock task.
+            // The guardian task remains alive and can be reopened from its launcher icon.
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                try { openHome(c); } catch (Exception ignored) {}
+            }, 350L);
         } catch (Exception e) {
-            try { c.startActivity(i); } catch (Exception ignored) {}
+            clearRestrictedMode(c);
         }
     }
 
