@@ -57,10 +57,11 @@ public class ScreenTimeService extends Service {
         boolean usageAccess = ScreenTimeTracker.hasUsageAccess(this);
         boolean override = Prefs.isOverrideActive(this);
 
-        // Recovery invariant: if restricted mode is active, Screen Time Guard itself must
-        // remain allowlisted. An active guardian override or disabled protection still exits.
+        // Recovery invariant: never leave the phone trapped. Restricted mode is immediately
+        // cleared if protection is disabled, Device Owner is gone, a guardian override is
+        // active, Usage Access disappears, or the guardian package is no longer permitted.
         if (PolicyUtils.isRestrictedModeActive(this)) {
-            if (!owner || !enabled || override) {
+            if (!owner || !enabled || override || !usageAccess) {
                 PolicyUtils.clearRestrictedMode(this);
             } else {
                 try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
@@ -102,28 +103,21 @@ public class ScreenTimeService extends Service {
             return;
         }
 
-        // ANTI-BYPASS: Usage Access cannot be technically locked by DevicePolicyManager.
-        // Instead, strong protection fails closed. If the user revokes Usage Access while
-        // protection is enabled, restricted mode starts immediately and remains until the
-        // guardian restores access or authorizes an override.
+        // SAFETY OVER ANTI-BYPASS: Android does not provide a Device Owner API that can make
+        // Usage Access untoggleable. The previous fail-closed behavior could trap the phone.
+        // Therefore missing/unreadable Usage Access now always clears restricted mode and
+        // leaves a visible warning. Strong protection remains marked enabled, so the guardian
+        // can restore Usage Access without losing configuration.
         if (!usageAccess) {
-            try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
-            if (PolicyUtils.isGuardianLockTaskPermitted(this)
-                    && !PolicyUtils.isRestrictedModeActive(this)) {
-                PolicyUtils.enterRestrictedMode(this);
-            }
-            update("Usage Access removed · guardian action required");
+            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
+            update("Usage Access missing · restore it to resume screen-time enforcement");
             return;
         }
 
         long used = ScreenTimeTracker.getTodayInteractiveMillis(this);
         if (used < 0L) {
-            try { PolicyUtils.prepareRestrictedLockTask(this); } catch (Exception ignored) {}
-            if (PolicyUtils.isGuardianLockTaskPermitted(this)
-                    && !PolicyUtils.isRestrictedModeActive(this)) {
-                PolicyUtils.enterRestrictedMode(this);
-            }
-            update("Usage data unavailable · guardian action required");
+            if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
+            update("Usage data unavailable · restriction suspended for safety");
             return;
         }
 
