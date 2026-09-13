@@ -107,6 +107,12 @@ public final class PolicyUtils {
         if (!isDeviceOwner(c)) return;
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
+
+        // Only Screen Time Guard and AdGuard are protected from uninstall. Older builds used
+        // DISALLOW_APPS_CONTROL, which unintentionally prevented managing/uninstalling every app.
+        // Clear that legacy global restriction whenever persistent protection is applied.
+        try { d.clearUserRestriction(a, UserManager.DISALLOW_APPS_CONTROL); } catch (Exception ignored) {}
+
         try { d.setUninstallBlocked(a, c.getPackageName(), true); } catch (Exception ignored) {}
         if (isAdGuardInstalled(c)) {
             try { d.setUninstallBlocked(a, ADGUARD_PACKAGE, true); } catch (Exception ignored) {}
@@ -120,7 +126,7 @@ public final class PolicyUtils {
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
         try { d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_DATE_TIME); } catch (Exception ignored) {}
-        try { d.addUserRestriction(a, UserManager.DISALLOW_APPS_CONTROL); } catch (Exception ignored) {}
+        // Do not use DISALLOW_APPS_CONTROL here: it globally blocks normal app management.
     }
 
     public static void removeScreenTimePolicies(Context c) {
