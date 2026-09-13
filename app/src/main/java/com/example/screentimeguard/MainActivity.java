@@ -50,6 +50,7 @@ public class MainActivity extends Activity {
 
     private TextView usedValue;
     private TextView remainingValue;
+    private TextView dailyLimitValue;
     private TextView progressCaption;
     private TextView protectionPill;
     private TextView ownerValue;
@@ -139,31 +140,49 @@ public class MainActivity extends Activity {
         LinearLayout hero = card();
         LinearLayout heroRow = new LinearLayout(this);
         heroRow.setOrientation(LinearLayout.HORIZONTAL);
+        heroRow.setGravity(Gravity.CENTER_VERTICAL);
 
         LinearLayout usedCol = new LinearLayout(this);
         usedCol.setOrientation(LinearLayout.VERTICAL);
         usedCol.addView(text("Today's screen time", 15, TEXT, false));
         usedValue = text("0h 0m", 38, TEXT, true);
         usedCol.addView(usedValue);
-        usedCol.addView(text("Unlocked active time", 13, MUTED, false));
+        usedCol.addView(text("Keep going!", 13, MUTED, false));
         heroRow.addView(usedCol, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f));
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1.05f));
 
         View divider = new View(this);
         divider.setBackgroundColor(Color.argb(90, 120, 160, 200));
-        LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(dp(1), dp(86));
-        divLp.setMargins(dp(10), 0, dp(18), 0);
+        LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(dp(1), dp(90));
+        divLp.setMargins(dp(8), 0, dp(14), 0);
         heroRow.addView(divider, divLp);
 
         LinearLayout remainingCol = new LinearLayout(this);
         remainingCol.setOrientation(LinearLayout.VERTICAL);
-        remainingCol.addView(text("Remaining today", 15, TEXT, false));
-        remainingValue = text("0m", 31, ACCENT, true);
+        remainingCol.addView(text("Remaining today", 14, TEXT, false));
+        remainingValue = text("0m", 30, ACCENT, true);
         remainingCol.addView(remainingValue);
-        TextView limitHint = text("Daily limit", 12, MUTED, false);
-        remainingCol.addView(limitHint);
+        remainingCol.addView(text("Daily limit", 12, MUTED, false));
+        dailyLimitValue = text("0h 0m", 16, TEXT, false);
+        remainingCol.addView(dailyLimitValue);
         heroRow.addView(remainingCol, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0.8f));
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0.75f));
+
+        LinearLayout encouragement = new LinearLayout(this);
+        encouragement.setOrientation(LinearLayout.VERTICAL);
+        encouragement.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
+        encouragement.setPadding(dp(4), 0, 0, 0);
+        TextView quote = text("You\ngot this!", 14, MUTED, false);
+        quote.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.ITALIC));
+        quote.setGravity(Gravity.CENTER);
+        encouragement.addView(quote);
+        ImageView heroMascot = new ImageView(this);
+        heroMascot.setImageResource(R.drawable.ic_guardian_figure_only);
+        heroMascot.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        encouragement.addView(heroMascot, new LinearLayout.LayoutParams(dp(72), dp(86)));
+        heroRow.addView(encouragement, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0.62f));
+
         hero.addView(heroRow);
 
         dailyProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -171,7 +190,7 @@ public class MainActivity extends Activity {
         dailyProgress.setProgress(0);
         dailyProgress.setProgressTintList(ColorStateList.valueOf(ACCENT));
         dailyProgress.setProgressBackgroundTintList(ColorStateList.valueOf(Color.rgb(54, 70, 88)));
-        hero.addView(dailyProgress, full(dp(2), 14, dp(2), 0));
+        hero.addView(dailyProgress, full(dp(2), 12, dp(2), 0));
 
         progressCaption = text("0% of daily limit used", 13, MUTED, false);
         hero.addView(progressCaption, full(dp(2), 4, dp(2), 0));
@@ -343,6 +362,7 @@ public class MainActivity extends Activity {
 
         usedValue.setText(ScreenTimeTracker.formatDuration(used));
         remainingValue.setText(ScreenTimeTracker.formatDuration(remaining));
+        dailyLimitValue.setText(ScreenTimeTracker.formatDuration(limitMs));
         dailyProgress.setProgress(Math.round(ratio * 1000f));
         progressCaption.setText(Math.round(ratio * 100f) + "% of daily limit used  ·  "
                 + ScreenTimeTracker.formatDuration(limitMs) + " total");
