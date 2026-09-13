@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#05070B"
+        android:pathData="M0,0H108V108H0Z" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#24B8FF"
+        android:strokeWidth="4.3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M22,95 C22,64 31,44 48,36 C65,28 85,33 95,43 C99,47 99,51 94,53 C84,56 70,56 56,56" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#24B8FF"
+        android:strokeWidth="4.3"
+        android:strokeLineCap="round"
+        android:pathData="M74,56 C82,71 84,85 84,96" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#24B8FF"
+        android:strokeWidth="4.3"
+        android:strokeLineCap="round"
+        android:pathData="M38,29 L41,72" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#24B8FF"
+        android:strokeWidth="4.3"
+        android:strokeLineCap="round"
+        android:pathData="M38,29 L32,23 M38,29 L39,20" />
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#24B8FF"
+        android:strokeWidth="4.3"
+        android:strokeLineCap="round"
+        android:pathData="M83,33 L83,20 M83,20 L78,14 M83,20 L88,13" />
+
+    <path android:fillColor="#24B8FF" android:pathData="M38,29 m-4.2,0 a4.2,4.2 0,1 0,8.4,0 a4.2,4.2 0,1 0,-8.4,0" />
+    <path android:fillColor="#24B8FF" android:pathData="M83,20 m-4.2,0 a4.2,4.2 0,1 0,8.4,0 a4.2,4.2 0,1 0,-8.4,0" />
+    <path android:fillColor="#24B8FF" android:pathData="M64,46 m-1.7,0 a1.7,1.7 0,1 0,3.4,0 a1.7,1.7 0,1 0,-3.4,0" />
+    <path android:fillColor="#24B8FF" android:pathData="M82,44 m-1.7,0 a1.7,1.7 0,1 0,3.4,0 a1.7,1.7 0,1 0,-3.4,0" />
+</vector>
