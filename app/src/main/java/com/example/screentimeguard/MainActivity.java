@@ -113,7 +113,6 @@ public class MainActivity extends Activity {
         scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // Header
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -136,7 +135,6 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(header, full(0, 0, 0, 16));
 
-        // Screen-time hero card
         LinearLayout hero = card();
         LinearLayout heroRow = new LinearLayout(this);
         heroRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -196,7 +194,6 @@ public class MainActivity extends Activity {
         hero.addView(progressCaption, full(dp(2), 4, dp(2), 0));
         root.addView(hero, full(0, 0, 0, 14));
 
-        // Protection status
         LinearLayout protection = card();
         LinearLayout protectionTop = new LinearLayout(this);
         protectionTop.setOrientation(LinearLayout.HORIZONTAL);
@@ -220,7 +217,6 @@ public class MainActivity extends Activity {
         protection.addView(statusRow2);
         root.addView(protection, full(0, 0, 0, 14));
 
-        // Daily limit
         LinearLayout limitCard = card();
         limitCard.addView(text("Daily limit", 21, TEXT, true));
         limitCard.addView(text("Set how much screen time is allowed per day.", 13, MUTED, false),
@@ -238,7 +234,6 @@ public class MainActivity extends Activity {
         limitCard.addView(limitRow);
         root.addView(limitCard, full(0, 0, 0, 14));
 
-        // Allowed apps
         LinearLayout allowedCard = card();
         LinearLayout allowedTop = new LinearLayout(this);
         allowedTop.setOrientation(LinearLayout.HORIZONTAL);
@@ -255,7 +250,6 @@ public class MainActivity extends Activity {
         allowedCard.addView(allowedTop);
         root.addView(allowedCard, full(0, 0, 0, 14));
 
-        // Main actions
         root.addView(sectionTitle("Controls"), full(4, 3, 0, 5));
         Button save = actionButton("✓   Save daily limit", ACCENT);
         save.setOnClickListener(v -> requirePin(this::saveLimit));
@@ -264,6 +258,11 @@ public class MainActivity extends Activity {
         Button apps = actionButton("▦   Choose apps allowed after limit", ACCENT);
         apps.setOnClickListener(v -> requirePin(this::chooseAllowedApps));
         root.addView(apps, actionLp());
+
+        Button installControl = actionButton("▣   App installation control", ACCENT);
+        installControl.setOnClickListener(v ->
+                startActivity(new Intent(this, InstallControlActivity.class)));
+        root.addView(installControl, actionLp());
 
         Button unlock = actionButton("▣   Guardian unlock until midnight", ACCENT);
         unlock.setOnClickListener(v -> requirePin(this::unlockUntilMidnight));
@@ -284,7 +283,6 @@ public class MainActivity extends Activity {
         disable.setOnClickListener(v -> requirePin(this::disable));
         root.addView(disable, actionLp());
 
-        // Quick controls
         LinearLayout quickCard = card();
         quickCard.addView(text("Quick controls", 21, TEXT, true));
         quickCard.addView(text("Available even when restricted mode hides Quick Settings.",
@@ -328,7 +326,6 @@ public class MainActivity extends Activity {
         quickCard.addView(rotationButton, actionLp());
         root.addView(quickCard, full(0, 9, 0, 14));
 
-        // Safety / maintenance
         root.addView(sectionTitle("Safety & maintenance"), full(4, 3, 0, 5));
         Button reapplyAdGuard = actionButton("↻   Reapply AdGuard / anti-reset protection", MUTED);
         reapplyAdGuard.setOnClickListener(v -> {
