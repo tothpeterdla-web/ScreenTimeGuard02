@@ -38,7 +38,7 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
         views.setTextViewText(R.id.widget_used, ScreenTimeTracker.formatDuration(used));
         views.setTextViewText(R.id.widget_remaining, ScreenTimeTracker.formatDuration(remaining));
         views.setTextViewText(R.id.widget_limit, ScreenTimeTracker.formatDuration(limit));
-        views.setTextViewText(R.id.widget_percent, Math.round(progress / 10f) + "% of daily limit used");
+        views.setTextViewText(R.id.widget_percent, Math.round(progress / 10f) + "% used");
         views.setProgressBar(R.id.widget_progress, 1000, progress, false);
 
         boolean enabled = Prefs.isEnabled(context);
