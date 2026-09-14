@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="18dp"
+    android:background="@drawable/widget_glass_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Screen time"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:textColor="#D8ECFF" />
+
+        <TextView
+            android:id="@+id/widget_refresh"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:text="↻"
+            android:textSize="28sp"
+            android:textColor="#8FCBFF" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_used"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="0h 0m"
+        android:textSize="42sp"
+        android:textStyle="bold"
+        android:textColor="#FFFFFF" />
+
+    <TextView
+        android:id="@+id/widget_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:text="Keep going!"
+        android:textSize="17sp"
+        android:textColor="#7EA7CF" />
+
+    <ProgressBar
+        android:id="@+id/widget_progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="9dp"
+        android:layout_marginTop="16dp"
+        android:max="1000"
+        android:progress="0"
+        android:progressTint="#24B8FF"
+        android:progressBackgroundTint="#23415E" />
+
+    <TextView
+        android:id="@+id/widget_percent"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="5dp"
+        android:text="0% of daily limit used"
+        android:textSize="12sp"
+        android:textColor="#8CA9C5" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:background="@drawable/widget_inner_card">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Remaining today"
+            android:textSize="13sp"
+            android:textColor="#8CA9C5" />
+
+        <TextView
+            android:id="@+id/widget_remaining"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="0h 0m"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:textColor="#28BCFF" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Daily limit"
+            android:textSize="12sp"
+            android:textColor="#8CA9C5" />
+
+        <TextView
+            android:id="@+id/widget_limit"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0h 0m"
+            android:textSize="17sp"
+            android:textColor="#F4F9FF" />
+    </LinearLayout>
+
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="bottom|center_vertical">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="You\ngot this!"
+            android:textSize="16sp"
+            android:textStyle="italic"
+            android:textColor="#79BFFF" />
+
+        <ImageView
+            android:layout_width="92dp"
+            android:layout_height="100dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_guardian_figure_only"
+            android:contentDescription="@string/app_name" />
+    </LinearLayout>
+
+</LinearLayout>
