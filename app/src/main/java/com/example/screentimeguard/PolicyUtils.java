@@ -122,7 +122,6 @@ public final class PolicyUtils {
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
         try {
-            // Clear the old all-installs restriction used by earlier builds so Play Store installs work.
             d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS);
 
             if (Prefs.isInstallWindowActive(c)) {
@@ -152,6 +151,19 @@ public final class PolicyUtils {
         try { d.setUninstallBlocked(a, c.getPackageName(), true); } catch (Exception ignored) {}
         if (isAdGuardInstalled(c)) {
             try { d.setUninstallBlocked(a, ADGUARD_PACKAGE, true); } catch (Exception ignored) {}
+
+            // Keep AdGuard selected as the system always-on VPN, but deliberately do NOT enable
+            // VPN lockdown. This avoids cutting off all internet if AdGuard fails to start.
+            // Only lock VPN settings after Android confirms the always-on assignment succeeded.
+            boolean alwaysOnApplied = false;
+            try {
+                d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, false);
+                alwaysOnApplied = ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a));
+            } catch (Exception ignored) {}
+
+            if (alwaysOnApplied) {
+                try { d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_VPN); } catch (Exception ignored) {}
+            }
         }
         try { d.addUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET); } catch (Exception ignored) {}
         applyInstallProtection(c);
@@ -337,6 +349,8 @@ public final class PolicyUtils {
             removeScreenTimePolicies(c);
             Prefs.clearInstallWindow(c);
             try { d.clearUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET); } catch (Exception ignored) {}
+            try { d.clearUserRestriction(a, UserManager.DISALLOW_CONFIG_VPN); } catch (Exception ignored) {}
+            try { d.setAlwaysOnVpnPackage(a, null, false); } catch (Exception ignored) {}
             try { d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS); } catch (Exception ignored) {}
             try { d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES); } catch (Exception ignored) {}
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
