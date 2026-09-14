@@ -62,8 +62,6 @@ public class ScreenTimeService extends Service {
         String counter = "Used: " + ScreenTimeTracker.formatDuration(used)
                 + " · Remaining: " + ScreenTimeTracker.formatDuration(remaining);
 
-        // Safety invariant: never leave restricted mode active when protection is disabled,
-        // Device Owner is gone, guardian override is active, or our own package is not permitted.
         if (PolicyUtils.isRestrictedModeActive(this)) {
             if (!owner || !enabled || override) {
                 PolicyUtils.clearRestrictedMode(this);
@@ -118,6 +116,15 @@ public class ScreenTimeService extends Service {
         Intent i = new Intent(this, MainActivity.class);
         PendingIntent pi = PendingIntent.getActivity(this, 0, i,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        Intent installIntent = new Intent(this, InstallControlActivity.class);
+        PendingIntent installPi = PendingIntent.getActivity(this, 1, installIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        String installAction = Prefs.isInstallWindowActive(this)
+                ? "App installs: allowed"
+                : "App installs";
+
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
                 .setContentTitle("Screen Time Guard")
@@ -126,6 +133,8 @@ public class ScreenTimeService extends Service {
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setContentIntent(pi)
+                .addAction(new Notification.Action.Builder(
+                        android.R.drawable.ic_menu_manage, installAction, installPi).build())
                 .build();
     }
 
