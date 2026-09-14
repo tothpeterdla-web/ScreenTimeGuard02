@@ -16,6 +16,8 @@ public class ScreenTimeService extends Service {
     private static final String CHANNEL = "screen_time_guard";
     private static final int ID = 1001;
     private static final long POLL_MS = 5_000L;
+    private static final long WIDGET_UPDATE_MS = 30_000L;
+    private long lastWidgetUpdate = 0L;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private final Runnable poll = new Runnable() {
@@ -61,6 +63,12 @@ public class ScreenTimeService extends Service {
         long remaining = Math.max(0L, limit - used);
         String counter = "Used: " + ScreenTimeTracker.formatDuration(used)
                 + " · Remaining: " + ScreenTimeTracker.formatDuration(remaining);
+
+        long now = System.currentTimeMillis();
+        if (now - lastWidgetUpdate >= WIDGET_UPDATE_MS) {
+            ScreenTimeWidgetProvider.updateAll(this);
+            lastWidgetUpdate = now;
+        }
 
         if (PolicyUtils.isRestrictedModeActive(this)) {
             if (!owner || !enabled || override) {
