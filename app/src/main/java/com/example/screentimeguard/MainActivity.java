@@ -60,7 +60,6 @@ public class MainActivity extends Activity {
     private TextView allowedCount;
     private ProgressBar dailyProgress;
 
-    private Button wifiButton;
     private Button bluetoothButton;
     private Button mobileDataButton;
     private Button rotationButton;
@@ -288,10 +287,6 @@ public class MainActivity extends Activity {
         quickCard.addView(text("Available even when restricted mode hides Quick Settings.",
                 13, MUTED, false), full(0, 2, 0, 10));
 
-        wifiButton = smallButton();
-        wifiButton.setOnClickListener(v -> toggleWifi());
-        quickCard.addView(wifiButton, actionLp());
-
         bluetoothButton = smallButton();
         bluetoothButton.setOnClickListener(v -> toggleBluetooth());
         quickCard.addView(bluetoothButton, actionLp());
@@ -382,8 +377,7 @@ public class MainActivity extends Activity {
     }
 
     private void refreshQuickControls() {
-        if (wifiButton == null) return;
-        wifiButton.setText("Wi-Fi   " + (QuickControls.isWifiEnabled(this) ? "ON" : "OFF"));
+        if (bluetoothButton == null) return;
 
         if (!QuickControls.hasBluetoothPermission(this)) {
             bluetoothButton.setText("Bluetooth   permission required");
@@ -392,7 +386,7 @@ public class MainActivity extends Activity {
         }
 
         Boolean mobile = QuickControls.isMobileDataEnabled(this);
-        mobileDataButton.setText("Mobile data   " + (mobile == null ? "unknown" : (mobile ? "ON" : "OFF"))
+        mobileDataButton.setText("Internet   " + (mobile == null ? "open settings" : (mobile ? "mobile data on" : "mobile data off"))
                 + "   ›");
 
         int brightness = QuickControls.getBrightness(this);
@@ -405,13 +399,6 @@ public class MainActivity extends Activity {
         } else {
             rotationButton.setText("Auto rotation   grant control permission ›");
         }
-    }
-
-    private void toggleWifi() {
-        boolean target = !QuickControls.isWifiEnabled(this);
-        boolean ok = QuickControls.setWifiEnabled(this, target);
-        Toast.makeText(this, ok ? "Wi-Fi changing…" : "Could not change Wi-Fi", Toast.LENGTH_SHORT).show();
-        wifiButton.postDelayed(this::refreshQuickControls, 700L);
     }
 
     private void toggleBluetooth() {
