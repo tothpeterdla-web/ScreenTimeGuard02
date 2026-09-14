@@ -101,8 +101,35 @@ public final class PolicyUtils {
         }
     }
 
-    // Adult-content protection and the anti-reset policy are independent of screen time.
-    // They stay active whenever this package remains Device Owner.
+    public static boolean isAppInstallBlocked(Context c) {
+        if (!isDeviceOwner(c)) return false;
+        try {
+            Bundle restrictions = dpm(c).getUserRestrictions(admin(c));
+            return restrictions != null
+                    && restrictions.getBoolean(UserManager.DISALLOW_INSTALL_APPS, false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // App installation is blocked independently of screen time. A guardian can temporarily
+    // open a short install window from InstallControlActivity using the guardian PIN.
+    public static void applyInstallProtection(Context c) {
+        if (!isDeviceOwner(c)) return;
+        DevicePolicyManager d = dpm(c);
+        ComponentName a = admin(c);
+        try {
+            if (Prefs.isInstallWindowActive(c)) {
+                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS);
+            } else {
+                Prefs.clearInstallWindow(c);
+                d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    // Adult-content protection, install protection and anti-reset policy are independent of
+    // screen time. They stay active whenever this package remains Device Owner.
     public static void applyAdGuardProtection(Context c) {
         if (!isDeviceOwner(c)) return;
         DevicePolicyManager d = dpm(c);
@@ -118,6 +145,7 @@ public final class PolicyUtils {
             try { d.setUninstallBlocked(a, ADGUARD_PACKAGE, true); } catch (Exception ignored) {}
         }
         try { d.addUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET); } catch (Exception ignored) {}
+        applyInstallProtection(c);
     }
 
     public static void applyPersistentPolicies(Context c) {
@@ -136,7 +164,7 @@ public final class PolicyUtils {
         ComponentName a = admin(c);
         try { d.clearUserRestriction(a, UserManager.DISALLOW_CONFIG_DATE_TIME); } catch (Exception ignored) {}
         try { d.clearUserRestriction(a, UserManager.DISALLOW_APPS_CONTROL); } catch (Exception ignored) {}
-        // Deliberately keep factory-reset and AdGuard uninstall protection active.
+        // Deliberately keep factory-reset, AdGuard uninstall, and app-install protection active.
         applyAdGuardProtection(c);
     }
 
@@ -256,10 +284,6 @@ public final class PolicyUtils {
             return;
         }
 
-        // IMPORTANT: MainActivity itself is now the lock-task host. Previously LockActivity
-        // owned the lock-task session and the launcher could still refuse to open MainActivity
-        // on this ASUS build. Making the actual launcher activity the host means tapping the
-        // Screen Time Guard icon brings the already-authorized task back to the foreground.
         Intent i = new Intent(c, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         try {
@@ -271,8 +295,6 @@ public final class PolicyUtils {
                 c.startActivity(i);
             }
 
-            // Show the normal launcher after the guardian task has entered lock task.
-            // The guardian task remains alive and can be reopened from its launcher icon.
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 try { openHome(c); } catch (Exception ignored) {}
             }, 350L);
@@ -310,7 +332,9 @@ public final class PolicyUtils {
             DevicePolicyManager d = dpm(c);
             ComponentName a = admin(c);
             removeScreenTimePolicies(c);
+            Prefs.clearInstallWindow(c);
             try { d.clearUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET); } catch (Exception ignored) {}
+            try { d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS); } catch (Exception ignored) {}
             try { d.setUninstallBlocked(a, ADGUARD_PACKAGE, false); } catch (Exception ignored) {}
             try { d.setUninstallBlocked(a, c.getPackageName(), false); } catch (Exception ignored) {}
             d.clearDeviceOwnerApp(c.getPackageName());
