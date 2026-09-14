@@ -47,22 +47,20 @@ public class InstallControlActivity extends Activity {
         root.setPadding(dp(22), dp(26), dp(22), dp(26));
         root.setBackgroundColor(BG);
 
-        TextView title = text("App installation", 28, TEXT, true);
-        root.addView(title);
-        TextView subtitle = text("New apps are blocked all day unless a guardian temporarily allows installation.",
-                14, MUTED, false);
-        root.addView(subtitle, full(0, 6, 0, 18));
+        root.addView(text("APK sideloading", 28, TEXT, true));
+        root.addView(text("Play Store installs stay allowed. APK installs from browsers, file managers, and other unknown sources are blocked unless a guardian temporarily allows them.",
+                14, MUTED, false), full(0, 6, 0, 18));
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(18), dp(18), dp(18), dp(18));
         card.setBackground(cardBg());
 
-        card.addView(text("Install protection", 20, TEXT, true));
+        card.addView(text("Sideload protection", 20, TEXT, true));
         status = text("Checking…", 18, ACCENT, true);
         card.addView(status, full(0, 8, 0, 12));
 
-        Button allow = button("Allow app installs for 10 minutes");
+        Button allow = button("Allow APK installs for 10 minutes");
         allow.setOnClickListener(v -> requirePin(() -> {
             if (!PolicyUtils.isDeviceOwner(this)) {
                 Toast.makeText(this, "Device Owner is required", Toast.LENGTH_LONG).show();
@@ -70,23 +68,22 @@ public class InstallControlActivity extends Activity {
             }
             Prefs.allowAppInstallsForMinutes(this, 10);
             PolicyUtils.applyInstallProtection(this);
-            Toast.makeText(this, "App installs allowed for 10 minutes", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "APK installs allowed for 10 minutes", Toast.LENGTH_LONG).show();
             refresh();
         }));
         card.addView(allow, buttonLp());
 
-        Button lock = button("Block app installs now");
+        Button lock = button("Block APK installs now");
         lock.setOnClickListener(v -> requirePin(() -> {
             Prefs.clearInstallWindow(this);
             PolicyUtils.applyInstallProtection(this);
-            Toast.makeText(this, "App installation blocked", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "APK sideloading blocked", Toast.LENGTH_SHORT).show();
             refresh();
         }));
         card.addView(lock, buttonLp());
 
-        TextView note = text("This blocks installing apps from app stores and APK files. It does not block ordinary file downloads.",
-                13, MUTED, false);
-        card.addView(note, full(0, 12, 0, 0));
+        card.addView(text("This does not block ordinary file downloads or normal Play Store installs.",
+                13, MUTED, false), full(0, 12, 0, 0));
 
         root.addView(card, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -103,10 +100,10 @@ public class InstallControlActivity extends Activity {
         if (Prefs.isInstallWindowActive(this)) {
             long left = Math.max(0L, Prefs.getInstallAllowedUntil(this) - System.currentTimeMillis());
             long mins = Math.max(1L, (left + 59_999L) / 60_000L);
-            status.setText("Temporarily allowed · about " + mins + " min left");
+            status.setText("APK installs temporarily allowed · about " + mins + " min left");
             status.setTextColor(GOOD);
         } else {
-            status.setText(PolicyUtils.isAppInstallBlocked(this) ? "Blocked" : "Applying block…");
+            status.setText(PolicyUtils.isAppInstallBlocked(this) ? "APK installs blocked" : "Applying block…");
             status.setTextColor(ACCENT);
         }
     }
