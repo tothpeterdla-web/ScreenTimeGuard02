@@ -45,15 +45,13 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
         views.setTextViewText(R.id.widget_status,
                 enabled ? (remaining > 0L ? "Keep going!" : "Daily limit reached") : "Protection off");
 
-        Intent open = new Intent(context, MainActivity.class);
-        PendingIntent openPi = PendingIntent.getActivity(context, 20, open,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        views.setOnClickPendingIntent(R.id.widget_root, openPi);
-
         Intent refresh = new Intent(context, ScreenTimeWidgetProvider.class)
                 .setAction(ACTION_REFRESH);
         PendingIntent refreshPi = PendingIntent.getBroadcast(context, 21, refresh,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        // The widget is display-only: tapping anywhere simply refreshes its data.
+        views.setOnClickPendingIntent(R.id.widget_root, refreshPi);
         views.setOnClickPendingIntent(R.id.widget_refresh, refreshPi);
 
         manager.updateAppWidget(appWidgetId, views);
