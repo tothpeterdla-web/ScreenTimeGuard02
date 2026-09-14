@@ -37,6 +37,11 @@
         </activity>
 
         <activity
+            android:name=".InstallControlActivity"
+            android:exported="false"
+            android:lockTaskMode="if_whitelisted" />
+
+        <activity
             android:name=".LockActivity"
             android:exported="false"
             android:excludeFromRecents="true"
