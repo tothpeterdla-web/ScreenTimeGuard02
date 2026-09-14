@@ -14,6 +14,7 @@ public final class Prefs {
     private static final String KEY_LIMIT_MINUTES = "limit_minutes";
     private static final String KEY_OVERRIDE_UNTIL = "override_until";
     private static final String KEY_EXTRA_ALLOWED_PACKAGES = "extra_allowed_packages";
+    private static final String KEY_INSTALL_ALLOWED_UNTIL = "install_allowed_until";
 
     private Prefs() {}
 
@@ -68,5 +69,23 @@ public final class Prefs {
         ZonedDateTime now = ZonedDateTime.now();
         ZonedDateTime nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(now.getZone());
         prefs(context).edit().putLong(KEY_OVERRIDE_UNTIL, nextMidnight.toInstant().toEpochMilli()).apply();
+    }
+
+    public static long getInstallAllowedUntil(Context context) {
+        return prefs(context).getLong(KEY_INSTALL_ALLOWED_UNTIL, 0L);
+    }
+
+    public static boolean isInstallWindowActive(Context context) {
+        return System.currentTimeMillis() < getInstallAllowedUntil(context);
+    }
+
+    public static void allowAppInstallsForMinutes(Context context, int minutes) {
+        long duration = Math.max(1, minutes) * 60_000L;
+        prefs(context).edit().putLong(KEY_INSTALL_ALLOWED_UNTIL,
+                System.currentTimeMillis() + duration).apply();
+    }
+
+    public static void clearInstallWindow(Context context) {
+        prefs(context).edit().remove(KEY_INSTALL_ALLOWED_UNTIL).apply();
     }
 }
