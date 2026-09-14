@@ -14,6 +14,10 @@ public final class Prefs {
     private static final String KEY_LIMIT_MINUTES = "limit_minutes";
     private static final String KEY_OVERRIDE_UNTIL = "override_until";
     private static final String KEY_EXTRA_ALLOWED_PACKAGES = "extra_allowed_packages";
+
+    // APK sideloading stays in the guardian-selected state until explicitly changed again.
+    private static final String KEY_INSTALL_ALLOWED = "install_allowed";
+    // Legacy key from the old 10-minute install-window implementation.
     private static final String KEY_INSTALL_ALLOWED_UNTIL = "install_allowed_until";
 
     private Prefs() {}
@@ -71,21 +75,31 @@ public final class Prefs {
         prefs(context).edit().putLong(KEY_OVERRIDE_UNTIL, nextMidnight.toInstant().toEpochMilli()).apply();
     }
 
-    public static long getInstallAllowedUntil(Context context) {
-        return prefs(context).getLong(KEY_INSTALL_ALLOWED_UNTIL, 0L);
-    }
-
     public static boolean isInstallWindowActive(Context context) {
-        return System.currentTimeMillis() < getInstallAllowedUntil(context);
+        return prefs(context).getBoolean(KEY_INSTALL_ALLOWED, false);
     }
 
+    public static void allowAppInstalls(Context context) {
+        prefs(context).edit()
+                .putBoolean(KEY_INSTALL_ALLOWED, true)
+                .remove(KEY_INSTALL_ALLOWED_UNTIL)
+                .apply();
+    }
+
+    // Kept for source compatibility with older callers; the duration is intentionally ignored.
     public static void allowAppInstallsForMinutes(Context context, int minutes) {
-        long duration = Math.max(1, minutes) * 60_000L;
-        prefs(context).edit().putLong(KEY_INSTALL_ALLOWED_UNTIL,
-                System.currentTimeMillis() + duration).apply();
+        allowAppInstalls(context);
+    }
+
+    // Kept temporarily for compatibility with older UI code during upgrades.
+    public static long getInstallAllowedUntil(Context context) {
+        return isInstallWindowActive(context) ? Long.MAX_VALUE : 0L;
     }
 
     public static void clearInstallWindow(Context context) {
-        prefs(context).edit().remove(KEY_INSTALL_ALLOWED_UNTIL).apply();
+        prefs(context).edit()
+                .putBoolean(KEY_INSTALL_ALLOWED, false)
+                .remove(KEY_INSTALL_ALLOWED_UNTIL)
+                .apply();
     }
 }
