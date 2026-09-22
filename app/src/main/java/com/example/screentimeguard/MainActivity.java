@@ -267,7 +267,7 @@ public class MainActivity extends Activity {
         messengerGuard.setOnClickListener(v -> {
             new AlertDialog.Builder(this)
                     .setTitle("Messenger link blocker")
-                    .setMessage("Enable Screen Time Guard in Accessibility. During restricted mode it will immediately close web pages opened inside Messenger while leaving chats usable.")
+                    .setMessage("Enable Screen Time Guard in Accessibility. During restricted mode it will immediately close web pages opened inside Messenger while leaving chats usable. If you disable this Accessibility service, Messenger itself will be blocked after the daily limit, so disabling it cannot restore web access.")
                     .setPositiveButton("Open Accessibility", (d, w) -> {
                         try {
                             startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
