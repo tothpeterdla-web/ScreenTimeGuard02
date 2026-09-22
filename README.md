@@ -51,6 +51,12 @@ Common browsers and app stores are treated as always-blocked packages in restric
 
 The current block list includes common packages for Chrome, Firefox, Edge, Opera, Brave, Vivaldi, DuckDuckGo, Google Play Store, Samsung Galaxy Store, Huawei AppGallery and several OEM app stores.
 
+### Messenger in-app link guard
+
+Messenger can render links in its own WebView instead of launching a separate browser package. Screen Time Guard includes an optional Accessibility service that watches only Messenger (`com.facebook.orca`) and, while restricted mode is active, immediately closes Messenger-hosted web pages while leaving normal chats usable.
+
+This service must be enabled once in Android Accessibility settings. Screen Time Guard includes a **Messenger link blocker** button that opens the correct system settings page.
+
 ### Guardian PIN
 
 Sensitive actions are protected by a guardian PIN, including:
