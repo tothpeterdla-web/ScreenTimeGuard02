@@ -15,8 +15,8 @@ android {
         applicationId "com.example.screentimeguard"
         minSdk 28
         targetSdk 35
-        versionCode 5
-        versionName "5.0-messenger-link-guard"
+        versionCode 6
+        versionName "6.0-messenger-guard-failsafe"
     }
 
     signingConfigs {
