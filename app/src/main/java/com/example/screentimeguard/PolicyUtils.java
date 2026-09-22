@@ -1,5 +1,6 @@
 package com.example.screentimeguard;
 
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ActivityOptions;
@@ -16,6 +17,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.UserManager;
 import android.telecom.TelecomManager;
+import android.view.accessibility.AccessibilityManager;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -27,6 +29,7 @@ public final class PolicyUtils {
     private PolicyUtils() {}
 
     public static final String ADGUARD_PACKAGE = "com.adguard.android";
+    public static final String MESSENGER_PACKAGE = "com.facebook.orca";
 
     private static final Set<String> ALWAYS_BLOCKED = new HashSet<>(Arrays.asList(
             "com.android.chrome", "com.sec.android.app.sbrowser", "org.mozilla.firefox",
@@ -70,6 +73,29 @@ public final class PolicyUtils {
 
     public static boolean isBuiltInAllowedPackage(String packageName) {
         return BUILT_IN_ALLOWED_AFTER_LIMIT.contains(packageName);
+    }
+
+    public static boolean isMessengerLinkGuardEnabled(Context c) {
+        try {
+            AccessibilityManager manager =
+                    (AccessibilityManager)c.getSystemService(Context.ACCESSIBILITY_SERVICE);
+            if (manager == null) return false;
+
+            List<AccessibilityServiceInfo> enabled =
+                    manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK);
+
+            ComponentName expected = new ComponentName(c, MessengerLinkGuardService.class);
+            for (AccessibilityServiceInfo info : enabled) {
+                if (info == null || info.getResolveInfo() == null
+                        || info.getResolveInfo().serviceInfo == null) continue;
+
+                ComponentName actual = new ComponentName(
+                        info.getResolveInfo().serviceInfo.packageName,
+                        info.getResolveInfo().serviceInfo.name);
+                if (expected.equals(actual)) return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
     }
 
     public static boolean isAdGuardInstalled(Context c) {
@@ -228,7 +254,14 @@ public final class PolicyUtils {
             if (!ALWAYS_BLOCKED.contains(pkg) && pm.getLaunchIntentForPackage(pkg) != null) result.add(pkg);
         }
         for (String pkg : Prefs.getExtraAllowedPackages(c)) {
-            if (!ALWAYS_BLOCKED.contains(pkg) && pm.getLaunchIntentForPackage(pkg) != null) result.add(pkg);
+            if (ALWAYS_BLOCKED.contains(pkg) || pm.getLaunchIntentForPackage(pkg) == null) continue;
+
+            // Messenger's in-app browser is hosted inside com.facebook.orca, so package-level
+            // browser blocking cannot distinguish it from chat. Fail closed: if our dedicated
+            // Accessibility guard is off, Messenger is not permitted in restricted mode.
+            if (MESSENGER_PACKAGE.equals(pkg) && !isMessengerLinkGuardEnabled(c)) continue;
+
+            result.add(pkg);
         }
         return result;
     }
