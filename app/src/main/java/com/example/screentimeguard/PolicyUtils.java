@@ -131,32 +131,30 @@ public final class PolicyUtils {
         if (!isDeviceOwner(c)) return false;
         try {
             Bundle restrictions = dpm(c).getUserRestrictions(admin(c));
-            if (restrictions == null) return false;
-            boolean local = restrictions.getBoolean(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES, false);
-            boolean global = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                    && restrictions.getBoolean(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY, false);
-            return local || global;
+            return restrictions != null
+                    && restrictions.getBoolean(UserManager.DISALLOW_INSTALL_APPS, false);
         } catch (Exception e) {
             return false;
         }
     }
 
-    // Store installs are allowed. Only APK/unknown-source installation is blocked independently
-    // of screen time. A guardian can temporarily open a short sideload window with the PIN.
+    // App installation is a master guardian-controlled gate independent of screen time.
+    // When disabled, installs are blocked from every source, including Play Store and APK files.
+    // When enabled, both store installs and unknown-source installs are permitted.
     public static void applyInstallProtection(Context c) {
         if (!isDeviceOwner(c)) return;
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
         try {
-            d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS);
-
             if (Prefs.isInstallWindowActive(c)) {
+                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS);
                 d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY);
                 }
             } else {
                 Prefs.clearInstallWindow(c);
+                d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS);
                 d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY);
@@ -165,7 +163,7 @@ public final class PolicyUtils {
         } catch (Exception ignored) {}
     }
 
-    // Adult-content protection, sideload protection and anti-reset policy are independent of
+    // Adult-content protection, app-install protection and anti-reset policy are independent of
     // screen time. They stay active whenever this package remains Device Owner.
     public static void applyAdGuardProtection(Context c) {
         if (!isDeviceOwner(c)) return;

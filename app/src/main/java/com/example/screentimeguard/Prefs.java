@@ -15,9 +15,9 @@ public final class Prefs {
     private static final String KEY_OVERRIDE_UNTIL = "override_until";
     private static final String KEY_EXTRA_ALLOWED_PACKAGES = "extra_allowed_packages";
 
-    // APK sideloading stays in the guardian-selected state until explicitly changed again.
+    // App installation permission stays in the guardian-selected state until explicitly changed again.
     private static final String KEY_INSTALL_ALLOWED = "install_allowed";
-    // Legacy key from the old 10-minute install-window implementation.
+    // Legacy key from the old timed installation-window implementation.
     private static final String KEY_INSTALL_ALLOWED_UNTIL = "install_allowed_until";
 
     private Prefs() {}

@@ -51,6 +51,15 @@ Common browsers and app stores are treated as always-blocked packages in restric
 
 The current block list includes common packages for Chrome, Firefox, Edge, Opera, Brave, Vivaldi, DuckDuckGo, Google Play Store, Samsung Galaxy Store, Huawei AppGallery and several OEM app stores.
 
+
+### App installation gate
+
+App installation is controlled independently of the daily screen-time limit. When installations are disabled, the Device Owner policy applies `DISALLOW_INSTALL_APPS`, so apps cannot be installed from Google Play, other app stores, or APK files. Unknown-source installation is also blocked explicitly.
+
+A guardian can enable installations from the **App installation control** screen using the guardian PIN. Installations then remain enabled until they are manually disabled again. Ordinary file downloads are not affected.
+
+App stores remain blocked during restricted mode as part of the separate screen-time anti-bypass policy.
+
 ### Messenger in-app link guard
 
 Messenger can render links in its own WebView instead of launching a separate browser package. Screen Time Guard includes an optional Accessibility service that watches only Messenger (`com.facebook.orca`) and, while restricted mode is active, immediately closes Messenger-hosted web pages while leaving normal chats usable.
