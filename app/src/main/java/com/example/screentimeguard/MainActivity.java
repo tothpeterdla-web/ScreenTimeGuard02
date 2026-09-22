@@ -263,6 +263,23 @@ public class MainActivity extends Activity {
                 startActivity(new Intent(this, InstallControlActivity.class)));
         root.addView(installControl, actionLp());
 
+        Button messengerGuard = actionButton("⊘   Messenger link blocker", ACCENT);
+        messengerGuard.setOnClickListener(v -> {
+            new AlertDialog.Builder(this)
+                    .setTitle("Messenger link blocker")
+                    .setMessage("Enable Screen Time Guard in Accessibility. During restricted mode it will immediately close web pages opened inside Messenger while leaving chats usable.")
+                    .setPositiveButton("Open Accessibility", (d, w) -> {
+                        try {
+                            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                        } catch (Exception e) {
+                            Toast.makeText(this, "Could not open Accessibility settings", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+        });
+        root.addView(messengerGuard, actionLp());
+
         Button unlock = actionButton("▣   Guardian unlock until midnight", ACCENT);
         unlock.setOnClickListener(v -> requirePin(this::unlockUntilMidnight));
         root.addView(unlock, actionLp());
