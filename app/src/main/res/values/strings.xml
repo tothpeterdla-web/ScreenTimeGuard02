@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Screen Time Guard</string>
     <string name="device_admin_description">Guardian-controlled screen-time limits with persistent AdGuard uninstall protection.</string>
+    <string name="messenger_link_guard_description">Blocks web pages opened inside Messenger while Screen Time Guard restricted mode is active.</string>
 </resources>
