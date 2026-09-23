@@ -163,8 +163,8 @@ public final class PolicyUtils {
         } catch (Exception ignored) {}
     }
 
-    // Adult-content protection, app-install protection and anti-reset policy are independent of
-    // screen time. They stay active whenever this package remains Device Owner.
+    // Adult-content protection, app-install protection, anti-reset and anti-safe-mode policies
+    // are independent of screen time. They stay active whenever this package remains Device Owner.
     public static void applyAdGuardProtection(Context c) {
         if (!isDeviceOwner(c)) return;
         DevicePolicyManager d = dpm(c);
@@ -190,6 +190,12 @@ public final class PolicyUtils {
             }
         }
         try { d.addUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET); } catch (Exception ignored) {}
+
+        // Safe Mode disables ordinary third-party apps, which would otherwise bypass both
+        // Screen Time Guard and AdGuard. Keep safe boot disabled for the entire lifetime of
+        // Device Owner, independent of the daily limit or the screen-time protection toggle.
+        try { d.addUserRestriction(a, UserManager.DISALLOW_SAFE_BOOT); } catch (Exception ignored) {}
+
         applyInstallProtection(c);
     }
 
@@ -380,6 +386,7 @@ public final class PolicyUtils {
             removeScreenTimePolicies(c);
             Prefs.clearInstallWindow(c);
             try { d.clearUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET); } catch (Exception ignored) {}
+            try { d.clearUserRestriction(a, UserManager.DISALLOW_SAFE_BOOT); } catch (Exception ignored) {}
             try { d.clearUserRestriction(a, UserManager.DISALLOW_CONFIG_VPN); } catch (Exception ignored) {}
             try { d.setAlwaysOnVpnPackage(a, null, false); } catch (Exception ignored) {}
             try { d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS); } catch (Exception ignored) {}
