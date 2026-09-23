@@ -90,10 +90,19 @@ Current Device Owner features include:
 - blocking uninstall of Screen Time Guard itself
 - blocking uninstall of AdGuard
 - blocking factory reset from Android Settings
+- blocking reboot into Android Safe Mode for as long as Screen Time Guard remains Device Owner
 - preventing date/time changes while strong screen-time protection is active
 - configuring Lock Task packages and features for restricted mode
 
 Normal third-party apps are intentionally **not** globally protected from uninstall.
+
+### Safe Mode anti-bypass protection
+
+When Screen Time Guard is Device Owner, it permanently applies Android's `DISALLOW_SAFE_BOOT` restriction. This policy is independent of the daily screen-time limit and remains active even when screen-time protection is turned off or a guardian override is active.
+
+The policy is restored on boot, on app replacement, when Device Owner is enabled, and continuously by the foreground enforcement service. It is removed only as part of the explicit guardian-authorized Device Owner release flow.
+
+This closes the Safe Mode loophole where Android would otherwise disable ordinary third-party apps such as Screen Time Guard and AdGuard during a Safe Mode boot.
 
 ### AdGuard integration
 
