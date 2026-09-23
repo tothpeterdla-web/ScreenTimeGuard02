@@ -15,8 +15,8 @@ android {
         applicationId "com.example.screentimeguard"
         minSdk 28
         targetSdk 35
-        versionCode 7
-        versionName "7.0-installation-master-gate"
+        versionCode 8
+        versionName "8.0-permanent-safe-mode-block"
     }
 
     signingConfigs {
