@@ -340,11 +340,6 @@ public class MainActivity extends Activity {
 
         root.addView(sectionTitle("Safety & maintenance"), full(4, 3, 0, 5));
 
-        Button guardianAuth = actionButton("◇   Guardian authorization proof", ACCENT);
-        guardianAuth.setOnClickListener(v ->
-                startActivity(new Intent(this, GuardianAuthActivity.class)));
-        root.addView(guardianAuth, actionLp());
-
         Button reapplyAdGuard = actionButton("↻   Reapply AdGuard / anti-reset protection", MUTED);
         reapplyAdGuard.setOnClickListener(v -> {
             PolicyUtils.applyAdGuardProtection(this);
