@@ -15,8 +15,8 @@ android {
         applicationId "com.example.screentimeguard"
         minSdk 28
         targetSdk 35
-        versionCode 8
-        versionName "8.0-permanent-safe-mode-block"
+        versionCode 9
+        versionName "9.0-remove-guardian-auth-proof"
     }
 
     signingConfigs {
