@@ -75,12 +75,13 @@ jobs:
         run: |
           set -euo pipefail
           LOG="$RUNNER_TEMP/cloudflare-d1-create.log"
-          if ! npx wrangler d1 create screentimeguard-remote \
+          if ! npx wrangler d1 create screentimeguard-remote --temporary \
               --binding DB --update-config --config wrangler.temp.jsonc >"$LOG" 2>&1; then
             echo "D1 creation failed. Sanitized diagnostic:"
             sed -E \
+              -e 's#https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+#<CLAIM_URL_REDACTED>#g' \
               -e 's#https://[^[:space:]?]+\?[^[:space:]]+#<URL_WITH_QUERY_REDACTED>#g' \
-              "$LOG" | grep -Ei 'error|failed|unsupported|invalid|config|binding|database|d1|authentication|permission|require' | tail -40 || true
+              "$LOG" | grep -Ei 'error|failed|temporary|unsupported|invalid|config|binding|database|d1|authentication|permission|require' | tail -40 || true
             exit 1
           fi
 
@@ -90,10 +91,13 @@ jobs:
         run: |
           set -euo pipefail
           LOG="$RUNNER_TEMP/cloudflare-d1-schema.log"
-          if ! npx wrangler d1 execute screentimeguard-remote --remote \
+          if ! npx wrangler d1 execute screentimeguard-remote --temporary --remote \
               --file=./schema.sql --yes --config wrangler.temp.jsonc >"$LOG" 2>&1; then
-            echo "D1 schema application failed."
-            grep -Ei 'error|failed|invalid|database|d1|authentication|permission|require' "$LOG" | tail -40 || true
+            echo "D1 schema application failed. Sanitized diagnostic:"
+            sed -E \
+              -e 's#https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+#<CLAIM_URL_REDACTED>#g' \
+              -e 's#https://[^[:space:]?]+\?[^[:space:]]+#<URL_WITH_QUERY_REDACTED>#g' \
+              "$LOG" | grep -Ei 'error|failed|temporary|unsupported|invalid|database|d1|authentication|permission|require' | tail -40 || true
             exit 1
           fi
 
