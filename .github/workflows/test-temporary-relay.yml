@@ -83,14 +83,6 @@ jobs:
           fs.writeFileSync('wrangler.temp.jsonc', JSON.stringify(config, null, 2));
           NODE
 
-      - name: Apply D1 schema
-        shell: bash
-        working-directory: remote
-        run: |
-          set -euo pipefail
-          npx wrangler d1 execute screentimeguard-remote --temporary --remote \
-            --file=./schema.sql --yes --config wrangler.temp.jsonc >/dev/null
-
       - name: Deploy relay with D1 binding
         id: final_deploy
         shell: bash
