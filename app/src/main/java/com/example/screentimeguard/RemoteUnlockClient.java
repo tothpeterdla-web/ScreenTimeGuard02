@@ -55,20 +55,28 @@ public final class RemoteUnlockClient {
 
                 String action = command.optString("action", "");
                 String toast;
+                boolean clearRestrictedMode = false;
+
                 if ("unlock_for_minutes".equals(action)) {
                     int minutes = command.optInt("minutes", 0);
                     if (minutes != 15 && minutes != 30 && minutes != 60) return;
                     Prefs.unlockForMinutes(app, minutes);
+                    clearRestrictedMode = true;
                     toast = "Parent remotely unlocked for " + minutes + " minutes";
                 } else if ("unlock_until_midnight".equals(action)) {
                     Prefs.unlockUntilMidnight(app);
+                    clearRestrictedMode = true;
                     toast = "Parent remotely unlocked until midnight";
+                } else if ("allow_app_installs_15".equals(action)) {
+                    Prefs.allowAppInstallsForMinutes(app, 15);
+                    PolicyUtils.applyInstallProtection(app);
+                    toast = "Parent allowed app installations for 15 minutes";
                 } else {
                     return;
                 }
 
                 RemoteUnlockConfig.setLastCommandId(app, id);
-                PolicyUtils.clearRestrictedMode(app);
+                if (clearRestrictedMode) PolicyUtils.clearRestrictedMode(app);
                 acknowledge(app, id);
 
                 String finalToast = toast;
