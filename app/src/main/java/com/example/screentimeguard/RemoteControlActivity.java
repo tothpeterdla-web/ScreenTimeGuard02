@@ -10,6 +10,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -36,9 +37,68 @@ public class RemoteControlActivity extends Activity {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
-        RemoteUnlockConfig.ensureCredentials(this);
-        buildUi();
-        refresh();
+
+        LinearLayout locked = new LinearLayout(this);
+        locked.setBackgroundColor(BG);
+        setContentView(locked);
+        authorizeSetup();
+    }
+
+    private void authorizeSetup() {
+        if (!PinStore.hasPin(this)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Guardian PIN required")
+                    .setMessage("Set a guardian PIN in Screen Time Guard first.")
+                    .setPositiveButton("OK", (d, w) -> finish())
+                    .setOnCancelListener(d -> finish())
+                    .show();
+            return;
+        }
+
+        if (PinStore.isLockedForToday(this)) {
+            Toast.makeText(this, "Guardian PIN locked for today. Try again tomorrow.", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+
+        EditText pin = new EditText(this);
+        pin.setHint("Guardian PIN");
+        pin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pin.setSingleLine(true);
+        pin.setTextColor(TEXT);
+        pin.setHintTextColor(MUTED);
+        pin.setPadding(dp(12), dp(10), dp(12), dp(10));
+
+        LinearLayout holder = new LinearLayout(this);
+        holder.setPadding(dp(18), 0, dp(18), 0);
+        holder.addView(pin, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Guardian authorization")
+                .setView(holder)
+                .setPositiveButton("Continue", null)
+                .setNegativeButton("Cancel", (d, w) -> finish())
+                .setOnCancelListener(d -> finish())
+                .create();
+
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    if (PinStore.verify(this, pin.getText().toString())) {
+                        dialog.dismiss();
+                        RemoteUnlockConfig.ensureCredentials(this);
+                        buildUi();
+                        refresh();
+                    } else if (PinStore.isLockedForToday(this)) {
+                        dialog.dismiss();
+                        Toast.makeText(this, "Guardian PIN locked for today. Try again tomorrow.", Toast.LENGTH_LONG).show();
+                        finish();
+                    } else {
+                        Toast.makeText(this, "Wrong PIN", Toast.LENGTH_SHORT).show();
+                        pin.setText("");
+                    }
+                }));
+        dialog.show();
     }
 
     private void buildUi() {
