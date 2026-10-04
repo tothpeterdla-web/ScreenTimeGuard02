@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -42,6 +43,11 @@
             android:lockTaskMode="if_whitelisted" />
 
         <activity
+            android:name=".RemoteControlActivity"
+            android:exported="false"
+            android:lockTaskMode="if_whitelisted" />
+
+        <activity
             android:name=".LockActivity"
             android:exported="false"
             android:excludeFromRecents="true"
@@ -78,7 +84,6 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/screen_time_widget_info" />
         </receiver>
-
 
         <service
             android:name=".MessengerLinkGuardService"
