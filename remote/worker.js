@@ -69,6 +69,8 @@ async function createUnlock(request, env) {
   if (action === "unlock_for_minutes") {
     minutes = Number(body.minutes);
     if (![15, 30, 60].includes(minutes)) return json({ error: "invalid_duration" }, 400);
+  } else if (action === "allow_app_installs_15") {
+    minutes = 15;
   } else if (action !== "unlock_until_midnight") {
     return json({ error: "invalid_action" }, 400);
   }
@@ -202,11 +204,11 @@ function parentPage() {
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Screen Time Guard Parent</title>
 <style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#05090f;color:#eff6ff;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:grid;place-items:center;padding:20px}.card{width:min(480px,100%);background:#142233;border:1px solid #52718c;border-radius:22px;padding:22px}h1{font-size:26px;margin:0 0 6px}p{color:#9bb1c9;line-height:1.45}button,input{width:100%;min-height:52px;border-radius:14px;border:1px solid #52718c;background:#0b1520;color:#eff6ff;padding:12px 14px;font-size:16px;margin-top:10px}button{cursor:pointer;font-weight:650}button.primary{border-color:#24b8ff}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid button{margin-top:0}.status{margin:14px 0;padding:12px;border-radius:14px;background:#0b1520;color:#9bb1c9}.ok{color:#49e78c}.bad{color:#ff6778}.small{font-size:12px;word-break:break-all}.hidden{display:none}</style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#05090f;color:#eff6ff;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:grid;place-items:center;padding:20px}.card{width:min(480px,100%);background:#142233;border:1px solid #52718c;border-radius:22px;padding:22px}h1{font-size:26px;margin:0 0 6px}h2{font-size:17px;margin:18px 0 8px}p{color:#9bb1c9;line-height:1.45}button,input{width:100%;min-height:52px;border-radius:14px;border:1px solid #52718c;background:#0b1520;color:#eff6ff;padding:12px 14px;font-size:16px;margin-top:10px}button{cursor:pointer;font-weight:650}button.primary{border-color:#24b8ff}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid button{margin-top:0}.status{margin:14px 0;padding:12px;border-radius:14px;background:#0b1520;color:#9bb1c9}.ok{color:#49e78c}.bad{color:#ff6778}.small{font-size:12px;word-break:break-all}.hidden{display:none}</style>
 </head>
 <body><main class="card">
-<h1>Parent remote unlock</h1>
-<p>Only temporary screen-time overrides are available here. Device Owner, uninstall protection and the guardian PIN cannot be disabled remotely.</p>
+<h1>Parent remote control</h1>
+<p>Temporary screen-time overrides and a 15-minute app-install window are available here. Device Owner, uninstall protection and the guardian PIN cannot be disabled remotely.</p>
 <div id="setup">
 <input id="device" placeholder="Device ID" autocomplete="off">
 <input id="secret" placeholder="Pairing secret" autocomplete="off">
@@ -214,12 +216,15 @@ function parentPage() {
 </div>
 <div id="controls" class="hidden">
 <div class="status">Paired device<br><span id="deviceLabel" class="small"></span></div>
+<h2>Screen time</h2>
 <div class="grid">
 <button onclick="unlockMinutes(15)">Unlock 15 min</button>
 <button onclick="unlockMinutes(30)">Unlock 30 min</button>
 <button onclick="unlockMinutes(60)">Unlock 1 hour</button>
 <button class="primary" onclick="unlockMidnight()">Until midnight</button>
 </div>
+<h2>App installation</h2>
+<button class="primary" onclick="allowAppInstalls()">Allow app installs for 15 min</button>
 <div id="result" class="status">Ready.</div>
 <button onclick="forget()">Forget this phone</button>
 </div>
@@ -231,9 +236,10 @@ function load(){parseHash();try{pairing=JSON.parse(localStorage.getItem(key)||'n
 function pair(){const device=document.getElementById('device').value.trim(),secret=document.getElementById('secret').value.trim();if(!device||!secret)return;pairing={device,secret};localStorage.setItem(key,JSON.stringify(pairing));render();}
 function forget(){localStorage.removeItem(key);pairing=null;render();}
 function render(){document.getElementById('setup').classList.toggle('hidden',!!pairing);document.getElementById('controls').classList.toggle('hidden',!pairing);if(pairing)document.getElementById('deviceLabel').textContent=pairing.device;}
-async function send(body){const out=document.getElementById('result');out.className='status';out.textContent='Sending…';try{const r=await fetch('/v1/unlock',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+pairing.secret},body:JSON.stringify({deviceId:pairing.device,...body})});if(!r.ok)throw new Error('Request failed ('+r.status+')');out.className='status ok';out.textContent='Unlock command sent.';}catch(e){out.className='status bad';out.textContent=e.message;}}
-function unlockMinutes(minutes){send({action:'unlock_for_minutes',minutes});}
-function unlockMidnight(){send({action:'unlock_until_midnight'});}
+async function send(body,message){const out=document.getElementById('result');out.className='status';out.textContent='Sending…';try{const r=await fetch('/v1/unlock',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+pairing.secret},body:JSON.stringify({deviceId:pairing.device,...body})});if(!r.ok)throw new Error('Request failed ('+r.status+')');out.className='status ok';out.textContent=message;}catch(e){out.className='status bad';out.textContent=e.message;}}
+function unlockMinutes(minutes){send({action:'unlock_for_minutes',minutes},'Screen-time unlock command sent.');}
+function unlockMidnight(){send({action:'unlock_until_midnight'},'Screen-time unlock command sent.');}
+function allowAppInstalls(){send({action:'allow_app_installs_15'},'App installations allowed for 15 minutes.');}
 load();
 </script></main></body></html>`;
 }
