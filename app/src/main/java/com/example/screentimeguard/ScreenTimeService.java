@@ -57,7 +57,7 @@ public class ScreenTimeService extends Service {
 
         boolean owner = PolicyUtils.isDeviceOwner(this);
         boolean enabled = Prefs.isEnabled(this);
-        if (owner && enabled) RemoteUnlockClient.poll(this);
+        if (owner) RemoteUnlockClient.poll(this);
 
         boolean override = Prefs.isOverrideActive(this);
         long used = ScreenTimeTracker.sample(this);
