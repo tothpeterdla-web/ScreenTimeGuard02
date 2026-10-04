@@ -48,7 +48,7 @@ public class InstallControlActivity extends Activity {
         root.setBackgroundColor(BG);
 
         root.addView(text("App installations", 28, TEXT, true));
-        root.addView(text("App installs from Play Store, other app stores, APK files, browsers, and file managers are blocked unless a guardian enables installations.",
+        root.addView(text("App installs from Play Store, other app stores, APK files, browsers, and file managers are blocked unless a guardian temporarily enables installations.",
                 14, MUTED, false), full(0, 6, 0, 18));
 
         LinearLayout card = new LinearLayout(this);
@@ -60,16 +60,16 @@ public class InstallControlActivity extends Activity {
         status = text("Checking…", 18, ACCENT, true);
         card.addView(status, full(0, 8, 0, 12));
 
-        Button allow = button("Enable app installations");
+        Button allow = button("Enable app installations for 15 minutes");
         allow.setOnClickListener(v -> requirePin(() -> {
             if (!PolicyUtils.isDeviceOwner(this)) {
                 Toast.makeText(this, "Device Owner is required", Toast.LENGTH_LONG).show();
                 return;
             }
-            Prefs.allowAppInstalls(this);
+            Prefs.allowAppInstallsForMinutes(this, 15);
             PolicyUtils.applyInstallProtection(this);
             Toast.makeText(this,
-                    "App installations enabled until you manually block them again",
+                    "App installations enabled for 15 minutes",
                     Toast.LENGTH_LONG).show();
             refresh();
         }));
@@ -84,7 +84,7 @@ public class InstallControlActivity extends Activity {
         }));
         card.addView(lock, buttonLp());
 
-        card.addView(text("When enabled, installs from Play Store, other app stores, and APK files stay allowed until you press ‘Disable app installations now’. Ordinary file downloads are not affected.",
+        card.addView(text("When enabled, installs from Play Store, other app stores, and APK files are allowed for 15 minutes, then automatically blocked again. Ordinary file downloads are not affected.",
                 13, MUTED, false), full(0, 12, 0, 0));
 
         root.addView(card, new LinearLayout.LayoutParams(
@@ -100,7 +100,9 @@ public class InstallControlActivity extends Activity {
         }
 
         if (Prefs.isInstallWindowActive(this)) {
-            status.setText("App installations enabled · manual reset required");
+            long left = Math.max(0L, Prefs.getInstallAllowedUntil(this) - System.currentTimeMillis());
+            long mins = Math.max(1L, (left + 59_999L) / 60_000L);
+            status.setText("App installations enabled · about " + mins + " min left");
             status.setTextColor(GOOD);
         } else {
             status.setText(PolicyUtils.isAppInstallBlocked(this) ? "All app installations blocked" : "Applying block…");
