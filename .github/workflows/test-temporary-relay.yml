@@ -48,16 +48,13 @@ jobs:
           LOG="$RUNNER_TEMP/cloudflare-bootstrap.log"
           npx wrangler deploy --temporary --config wrangler.temp.jsonc >"$LOG" 2>&1
 
-          WORKER_URL=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' "$LOG" | tail -1 || true)
+          BOOTSTRAP_URL=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' "$LOG" | tail -1 || true)
           CLAIM_URL=$(grep -Eo 'https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+' "$LOG" | tail -1 || true)
-          test -n "$WORKER_URL"
+          test -n "$BOOTSTRAP_URL"
           test -n "$CLAIM_URL"
 
-          echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
-          {
-            echo "WORKER_URL=$WORKER_URL"
-            echo "CLAIM_URL=$CLAIM_URL"
-          } > "$RUNNER_TEMP/cloudflare-claim.txt"
+          echo "claim_url=$CLAIM_URL" >> "$GITHUB_OUTPUT"
+          echo "Temporary Cloudflare account created." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create D1 database and explicit binding config
         shell: bash
@@ -90,13 +87,6 @@ jobs:
           fs.writeFileSync('wrangler.temp.jsonc', JSON.stringify(config, null, 2));
           NODE
 
-          node -e '
-            const fs=require("fs");
-            const c=JSON.parse(fs.readFileSync("wrangler.temp.jsonc","utf8"));
-            if(!c.d1_databases || c.d1_databases[0].binding!=="DB" || !c.d1_databases[0].database_id) process.exit(1);
-            console.log("Explicit D1 binding config ready.");
-          '
-
       - name: Apply D1 schema
         shell: bash
         working-directory: remote
@@ -106,16 +96,35 @@ jobs:
             --file=./schema.sql --yes --config wrangler.temp.jsonc >/dev/null
 
       - name: Deploy relay with D1 binding
+        id: final_deploy
         shell: bash
         working-directory: remote
+        env:
+          BOOTSTRAP_CLAIM_URL: ${{ steps.bootstrap.outputs.claim_url }}
         run: |
           set -euo pipefail
-          npx wrangler deploy --temporary --config wrangler.temp.jsonc >/dev/null
+          LOG="$RUNNER_TEMP/cloudflare-final-deploy.log"
+          npx wrangler deploy --temporary --config wrangler.temp.jsonc >"$LOG" 2>&1
+
+          WORKER_URL=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' "$LOG" | tail -1 || true)
+          FINAL_CLAIM_URL=$(grep -Eo 'https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+' "$LOG" | tail -1 || true)
+          test -n "$WORKER_URL"
+          if [ -z "$FINAL_CLAIM_URL" ]; then
+            FINAL_CLAIM_URL="$BOOTSTRAP_CLAIM_URL"
+          fi
+          test -n "$FINAL_CLAIM_URL"
+
+          echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "WORKER_URL=$WORKER_URL"
+            echo "CLAIM_URL=$FINAL_CLAIM_URL"
+          } > "$RUNNER_TEMP/cloudflare-claim.txt"
+          echo "Final D1-bound Worker deployed." >> "$GITHUB_STEP_SUMMARY"
 
       - name: End-to-end relay smoke test
         shell: bash
         env:
-          WORKER_URL: ${{ steps.bootstrap.outputs.worker_url }}
+          WORKER_URL: ${{ steps.final_deploy.outputs.worker_url }}
         run: |
           set -euo pipefail
 
@@ -140,23 +149,22 @@ jobs:
           DEVICE="test-device-$(openssl rand -hex 8)"
           SECRET=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
           AUTH="Authorization: Bearer $SECRET"
-          DEBUG="X-STG-Debug: 1"
 
           request register \
             -X POST "$WORKER_URL/v1/register" \
             -H 'Content-Type: application/json' \
-            -H "$AUTH" -H "$DEBUG" \
+            -H "$AUTH" \
             --data "{\"deviceId\":\"$DEVICE\"}"
 
           request unlock \
             -X POST "$WORKER_URL/v1/unlock" \
             -H 'Content-Type: application/json' \
-            -H "$AUTH" -H "$DEBUG" \
+            -H "$AUTH" \
             --data "{\"deviceId\":\"$DEVICE\",\"action\":\"allow_app_installs_15\"}"
 
           request command \
             "$WORKER_URL/v1/command?deviceId=$DEVICE" \
-            -H "$AUTH" -H "$DEBUG"
+            -H "$AUTH"
 
           node -e '
             const fs=require("fs");
@@ -169,13 +177,13 @@ jobs:
           request ack \
             -X POST "$WORKER_URL/v1/ack" \
             -H 'Content-Type: application/json' \
-            -H "$AUTH" -H "$DEBUG" \
+            -H "$AUTH" \
             --data "{\"deviceId\":\"$DEVICE\",\"id\":\"$COMMAND_ID\"}"
 
           request revoke \
             -X POST "$WORKER_URL/v1/revoke" \
             -H 'Content-Type: application/json' \
-            -H "$AUTH" -H "$DEBUG" \
+            -H "$AUTH" \
             --data "{\"deviceId\":\"$DEVICE\"}"
 
           echo "Worker page, D1 registration, 15-minute app-install command, polling, acknowledgement and revoke all passed." >> "$GITHUB_STEP_SUMMARY"
