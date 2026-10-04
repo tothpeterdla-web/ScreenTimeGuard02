@@ -47,74 +47,75 @@ jobs:
           set -euo pipefail
           LOG="$RUNNER_TEMP/cloudflare-bootstrap.log"
           if ! npx wrangler deploy --temporary --config wrangler.temp.jsonc >"$LOG" 2>&1; then
-            echo "Temporary Cloudflare bootstrap failed. Sanitized diagnostic:"
-            sed -E \
-              -e 's#https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+#<CLAIM_URL_REDACTED>#g' \
-              -e 's#https://[^[:space:]?]+\?[^[:space:]]+#<URL_WITH_QUERY_REDACTED>#g' \
-              "$LOG" | grep -Ei 'error|failed|temporary|unsupported|invalid|config|authentication|permission|require' | tail -40 || true
+            echo "Temporary Cloudflare bootstrap failed."
             exit 1
           fi
 
           WORKER_URL=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' "$LOG" | tail -1 || true)
           CLAIM_URL=$(grep -Eo 'https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+' "$LOG" | tail -1 || true)
-          if [ -z "$WORKER_URL" ] || [ -z "$CLAIM_URL" ]; then
-            echo "Temporary account was created, but deployment URLs could not be extracted."
-            exit 1
-          fi
+          test -n "$WORKER_URL"
+          test -n "$CLAIM_URL"
 
           echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
           {
             echo "WORKER_URL=$WORKER_URL"
             echo "CLAIM_URL=$CLAIM_URL"
           } > "$RUNNER_TEMP/cloudflare-claim.txt"
-          echo "Temporary Cloudflare account bootstrapped; claim token kept out of logs." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Create D1 database on temporary account
+      - name: Create D1 database and explicit binding config
         shell: bash
         working-directory: remote
         run: |
           set -euo pipefail
           LOG="$RUNNER_TEMP/cloudflare-d1-create.log"
-          if ! npx wrangler d1 create screentimeguard-remote --temporary \
-              --binding DB --update-config --config wrangler.temp.jsonc >"$LOG" 2>&1; then
-            echo "D1 creation failed. Sanitized diagnostic:"
-            sed -E \
-              -e 's#https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+#<CLAIM_URL_REDACTED>#g' \
-              -e 's#https://[^[:space:]?]+\?[^[:space:]]+#<URL_WITH_QUERY_REDACTED>#g' \
-              "$LOG" | grep -Ei 'error|failed|temporary|unsupported|invalid|config|binding|database|d1|authentication|permission|require' | tail -40 || true
+          npx wrangler d1 create screentimeguard-remote --temporary \
+            --config wrangler.temp.jsonc >"$LOG" 2>&1
+
+          DB_ID=$(sed -nE 's/.*database_id[[:space:]]*=[[:space:]]*"([0-9a-fA-F-]{36})".*/\1/p' "$LOG" | tail -1)
+          if [ -z "$DB_ID" ]; then
+            DB_ID=$(grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$LOG" | tail -1 || true)
+          fi
+          if [ -z "$DB_ID" ]; then
+            echo "D1 database was created but its database ID could not be parsed."
             exit 1
           fi
+
+          node - "$DB_ID" <<'NODE'
+          const fs = require('fs');
+          const dbId = process.argv[2];
+          const config = {
+            name: 'screentimeguard-remote',
+            main: 'worker.js',
+            compatibility_date: '2026-10-01',
+            d1_databases: [{
+              binding: 'DB',
+              database_name: 'screentimeguard-remote',
+              database_id: dbId
+            }]
+          };
+          fs.writeFileSync('wrangler.temp.jsonc', JSON.stringify(config, null, 2));
+          NODE
+
+          node -e '
+            const c=require("./wrangler.temp.jsonc");
+            if(!c.d1_databases || c.d1_databases[0].binding!=="DB" || !c.d1_databases[0].database_id) process.exit(1);
+            console.log("Explicit D1 binding config ready.");
+          '
 
       - name: Apply D1 schema
         shell: bash
         working-directory: remote
         run: |
           set -euo pipefail
-          LOG="$RUNNER_TEMP/cloudflare-d1-schema.log"
-          if ! npx wrangler d1 execute screentimeguard-remote --temporary --remote \
-              --file=./schema.sql --yes --config wrangler.temp.jsonc >"$LOG" 2>&1; then
-            echo "D1 schema application failed. Sanitized diagnostic:"
-            sed -E \
-              -e 's#https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+#<CLAIM_URL_REDACTED>#g' \
-              -e 's#https://[^[:space:]?]+\?[^[:space:]]+#<URL_WITH_QUERY_REDACTED>#g' \
-              "$LOG" | grep -Ei 'error|failed|temporary|unsupported|invalid|database|d1|authentication|permission|require' | tail -40 || true
-            exit 1
-          fi
+          npx wrangler d1 execute screentimeguard-remote --temporary --remote \
+            --file=./schema.sql --yes --config wrangler.temp.jsonc >/dev/null
 
       - name: Deploy relay with D1 binding
         shell: bash
         working-directory: remote
         run: |
           set -euo pipefail
-          LOG="$RUNNER_TEMP/cloudflare-final-deploy.log"
-          if ! npx wrangler deploy --temporary --config wrangler.temp.jsonc >"$LOG" 2>&1; then
-            echo "Final Worker deployment failed. Sanitized diagnostic:"
-            sed -E \
-              -e 's#https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+#<CLAIM_URL_REDACTED>#g' \
-              -e 's#https://[^[:space:]?]+\?[^[:space:]]+#<URL_WITH_QUERY_REDACTED>#g' \
-              "$LOG" | grep -Ei 'error|failed|temporary|unsupported|invalid|config|binding|database|d1|authentication|permission|require' | tail -40 || true
-            exit 1
-          fi
+          npx wrangler deploy --temporary --config wrangler.temp.jsonc >/dev/null
 
       - name: End-to-end relay smoke test
         shell: bash
