@@ -33,7 +33,11 @@ export default {
       return cors(json({ error: "not_found" }, 404));
     } catch (error) {
       console.error(error);
-      return cors(json({ error: "server_error" }, 500));
+      const body = { error: "server_error" };
+      if (request.headers.get("x-stg-debug") === "1") {
+        body.detail = String(error && error.message ? error.message : error).slice(0, 300);
+      }
+      return cors(json(body, 500));
     }
   }
 };
@@ -215,7 +219,7 @@ function json(body, status = 200) {
 function cors(response) {
   const h = new Headers(response.headers);
   h.set("access-control-allow-origin", "*");
-  h.set("access-control-allow-headers", "authorization, content-type");
+  h.set("access-control-allow-headers", "authorization, content-type, x-stg-debug");
   h.set("access-control-allow-methods", "GET, POST, OPTIONS");
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers: h });
 }
