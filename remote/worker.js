@@ -1,4 +1,5 @@
 const COMMAND_TTL_MS = 2 * 60 * 1000;
+let schemaReady = null;
 
 export default {
   async fetch(request, env) {
@@ -12,6 +13,8 @@ export default {
     }
 
     try {
+      if (url.pathname.startsWith("/v1/")) await ensureSchema(env);
+
       if (url.pathname === "/v1/register" && request.method === "POST") {
         return cors(await registerDevice(request, env));
       }
@@ -34,6 +37,26 @@ export default {
     }
   }
 };
+
+async function ensureSchema(env) {
+  if (!schemaReady) {
+    schemaReady = env.DB.batch([
+      env.DB.prepare(
+        "CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, created_at INTEGER NOT NULL)"
+      ),
+      env.DB.prepare(
+        "CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, action TEXT NOT NULL, minutes INTEGER, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE)"
+      ),
+      env.DB.prepare(
+        "CREATE INDEX IF NOT EXISTS idx_commands_device_pending ON commands(device_id, consumed_at, created_at DESC)"
+      )
+    ]).catch(error => {
+      schemaReady = null;
+      throw error;
+    });
+  }
+  await schemaReady;
+}
 
 async function registerDevice(request, env) {
   const body = await readJson(request);
