@@ -57,6 +57,8 @@ public class ScreenTimeService extends Service {
 
         boolean owner = PolicyUtils.isDeviceOwner(this);
         boolean enabled = Prefs.isEnabled(this);
+        if (owner && enabled) RemoteUnlockClient.poll(this);
+
         boolean override = Prefs.isOverrideActive(this);
         long used = ScreenTimeTracker.sample(this);
         long limit = Prefs.getLimitMinutes(this) * 60_000L;
@@ -97,7 +99,7 @@ public class ScreenTimeService extends Service {
 
         if (override) {
             if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            update(counter + " · guardian override until midnight");
+            update(counter + " · guardian override active");
             return;
         }
 
@@ -129,9 +131,17 @@ public class ScreenTimeService extends Service {
         PendingIntent installPi = PendingIntent.getActivity(this, 1, installIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
+        Intent remoteIntent = new Intent(this, RemoteControlActivity.class);
+        PendingIntent remotePi = PendingIntent.getActivity(this, 2, remoteIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
         String installAction = Prefs.isInstallWindowActive(this)
                 ? "App installs: enabled"
                 : "App installations";
+
+        String remoteAction = RemoteUnlockConfig.isEnabled(this)
+                ? "Parent remote: on"
+                : "Parent remote setup";
 
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
@@ -143,6 +153,8 @@ public class ScreenTimeService extends Service {
                 .setContentIntent(pi)
                 .addAction(new Notification.Action.Builder(
                         android.R.drawable.ic_menu_manage, installAction, installPi).build())
+                .addAction(new Notification.Action.Builder(
+                        android.R.drawable.ic_menu_share, remoteAction, remotePi).build())
                 .build();
     }
 
