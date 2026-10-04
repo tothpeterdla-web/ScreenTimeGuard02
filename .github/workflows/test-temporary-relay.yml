@@ -53,7 +53,11 @@ jobs:
           set -euo pipefail
           LOG="$RUNNER_TEMP/cloudflare-temporary-deploy.log"
           if ! npx wrangler deploy --temporary --config wrangler.temp.jsonc >"$LOG" 2>&1; then
-            echo "Temporary Cloudflare deployment failed. Sensitive deployment output was intentionally not printed."
+            echo "Temporary Cloudflare deployment failed. Sanitized diagnostic:"
+            sed -E \
+              -e 's#https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+#<CLAIM_URL_REDACTED>#g' \
+              -e 's#https://[^[:space:]?]+\?[^[:space:]]+#<URL_WITH_QUERY_REDACTED>#g' \
+              "$LOG" | grep -Ei 'error|failed|temporary|unsupported|invalid|config|binding|database|d1|authentication|permission|require' | tail -40 || true
             exit 1
           fi
 
