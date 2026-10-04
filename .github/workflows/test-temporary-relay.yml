@@ -122,29 +122,45 @@ jobs:
           WORKER_URL: ${{ steps.bootstrap.outputs.worker_url }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error "$WORKER_URL/" | grep -q "Parent remote control"
+
+          request() {
+            NAME="$1"; shift
+            BODY="$RUNNER_TEMP/${NAME}.json"
+            CODE=$(curl --silent --show-error -o "$BODY" -w '%{http_code}' "$@")
+            echo "$NAME -> HTTP $CODE"
+            if [ "$CODE" -lt 200 ] || [ "$CODE" -ge 300 ]; then
+              echo "$NAME response:"
+              cat "$BODY"
+              echo
+              exit 1
+            fi
+          }
+
+          ROOT_CODE=$(curl --silent --show-error -o "$RUNNER_TEMP/root.html" -w '%{http_code}' "$WORKER_URL/")
+          echo "root -> HTTP $ROOT_CODE"
+          test "$ROOT_CODE" = "200"
+          grep -q "Parent remote control" "$RUNNER_TEMP/root.html"
 
           DEVICE="test-device-$(openssl rand -hex 8)"
           SECRET=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
           AUTH="Authorization: Bearer $SECRET"
+          DEBUG="X-STG-Debug: 1"
 
-          REGISTER_CODE=$(curl --silent --show-error -o "$RUNNER_TEMP/register.json" -w '%{http_code}' \
+          request register \
             -X POST "$WORKER_URL/v1/register" \
             -H 'Content-Type: application/json' \
-            -H "$AUTH" \
-            --data "{\"deviceId\":\"$DEVICE\"}")
-          test "$REGISTER_CODE" = "201" -o "$REGISTER_CODE" = "200"
+            -H "$AUTH" -H "$DEBUG" \
+            --data "{\"deviceId\":\"$DEVICE\"}"
 
-          curl --fail --silent --show-error \
+          request unlock \
             -X POST "$WORKER_URL/v1/unlock" \
             -H 'Content-Type: application/json' \
-            -H "$AUTH" \
-            --data "{\"deviceId\":\"$DEVICE\",\"action\":\"allow_app_installs_15\"}" \
-            > "$RUNNER_TEMP/unlock.json"
+            -H "$AUTH" -H "$DEBUG" \
+            --data "{\"deviceId\":\"$DEVICE\",\"action\":\"allow_app_installs_15\"}"
 
-          curl --fail --silent --show-error \
+          request command \
             "$WORKER_URL/v1/command?deviceId=$DEVICE" \
-            -H "$AUTH" > "$RUNNER_TEMP/command.json"
+            -H "$AUTH" -H "$DEBUG"
 
           node -e '
             const fs=require("fs");
@@ -154,24 +170,25 @@ jobs:
           '
 
           COMMAND_ID=$(cat "$RUNNER_TEMP/command-id.txt")
-          curl --fail --silent --show-error \
+          request ack \
             -X POST "$WORKER_URL/v1/ack" \
             -H 'Content-Type: application/json' \
-            -H "$AUTH" \
-            --data "{\"deviceId\":\"$DEVICE\",\"id\":\"$COMMAND_ID\"}" >/dev/null
+            -H "$AUTH" -H "$DEBUG" \
+            --data "{\"deviceId\":\"$DEVICE\",\"id\":\"$COMMAND_ID\"}"
 
-          curl --fail --silent --show-error \
+          request revoke \
             -X POST "$WORKER_URL/v1/revoke" \
             -H 'Content-Type: application/json' \
-            -H "$AUTH" \
-            --data "{\"deviceId\":\"$DEVICE\"}" >/dev/null
+            -H "$AUTH" -H "$DEBUG" \
+            --data "{\"deviceId\":\"$DEVICE\"}"
 
           echo "Worker page, D1 registration, 15-minute app-install command, polling, acknowledgement and revoke all passed." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload claim details securely
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cloudflare-temporary-claim
           path: ${{ runner.temp }}/cloudflare-claim.txt
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 1
