@@ -46,10 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           LOG="$RUNNER_TEMP/cloudflare-bootstrap.log"
-          if ! npx wrangler deploy --temporary --config wrangler.temp.jsonc >"$LOG" 2>&1; then
-            echo "Temporary Cloudflare bootstrap failed."
-            exit 1
-          fi
+          npx wrangler deploy --temporary --config wrangler.temp.jsonc >"$LOG" 2>&1
 
           WORKER_URL=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' "$LOG" | tail -1 || true)
           CLAIM_URL=$(grep -Eo 'https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+' "$LOG" | tail -1 || true)
@@ -75,10 +72,7 @@ jobs:
           if [ -z "$DB_ID" ]; then
             DB_ID=$(grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$LOG" | tail -1 || true)
           fi
-          if [ -z "$DB_ID" ]; then
-            echo "D1 database was created but its database ID could not be parsed."
-            exit 1
-          fi
+          test -n "$DB_ID"
 
           node - "$DB_ID" <<'NODE'
           const fs = require('fs');
@@ -97,7 +91,8 @@ jobs:
           NODE
 
           node -e '
-            const c=require("./wrangler.temp.jsonc");
+            const fs=require("fs");
+            const c=JSON.parse(fs.readFileSync("wrangler.temp.jsonc","utf8"));
             if(!c.d1_databases || c.d1_databases[0].binding!=="DB" || !c.d1_databases[0].database_id) process.exit(1);
             console.log("Explicit D1 binding config ready.");
           '
