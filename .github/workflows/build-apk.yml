@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "main", "feature/remote-parent-unlock" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
