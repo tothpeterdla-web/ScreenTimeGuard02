@@ -14,6 +14,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class RemoteUnlockClient {
@@ -22,6 +23,7 @@ public final class RemoteUnlockClient {
     }
 
     private static final AtomicBoolean POLL_IN_FLIGHT = new AtomicBoolean(false);
+    private static final String PIN_PROOF_PREFIX = "stg-remote-pin-v1|";
 
     private RemoteUnlockClient() {}
 
@@ -90,22 +92,30 @@ public final class RemoteUnlockClient {
         }, "remote-unlock-poll").start();
     }
 
-    public static void registerAsync(Context context, Callback callback) {
+    public static void registerAsync(Context context, String guardianPin, Callback callback) {
         Context app = context.getApplicationContext();
         new Thread(() -> {
             boolean ok = false;
             String message;
             try {
                 RemoteUnlockConfig.ensureCredentials(app);
+                String secret = RemoteUnlockConfig.getSecret(app);
                 JSONObject body = new JSONObject();
                 body.put("deviceId", RemoteUnlockConfig.getDeviceId(app));
+                body.put("guardianProof", guardianProof(secret, guardianPin));
                 HttpURLConnection c = connection(
                         RemoteUnlockConfig.getBaseUrl(app) + "/v1/register",
-                        "POST", RemoteUnlockConfig.getSecret(app));
+                        "POST", secret);
                 writeJson(c, body);
                 int code = c.getResponseCode();
                 ok = code == 200 || code == 201;
-                message = ok ? "Remote unlock is ready" : "Relay rejected registration (" + code + ")";
+                if (ok) {
+                    message = "Remote unlock is ready";
+                } else if (code == 409) {
+                    message = "Remote PIN changed. Revoke the old pairing, then enable it again.";
+                } else {
+                    message = "Relay rejected registration (" + code + ")";
+                }
             } catch (Exception e) {
                 message = "Could not reach the remote unlock relay";
             }
@@ -137,6 +147,15 @@ public final class RemoteUnlockClient {
             String resultMessage = message;
             new Handler(Looper.getMainLooper()).post(() -> callback.onResult(result, resultMessage));
         }, "remote-unlock-revoke").start();
+    }
+
+    private static String guardianProof(String secret, String pin) throws Exception {
+        String input = PIN_PROOF_PREFIX + secret + "|" + pin;
+        byte[] digest = MessageDigest.getInstance("SHA-256")
+                .digest(input.getBytes(StandardCharsets.UTF_8));
+        StringBuilder out = new StringBuilder(digest.length * 2);
+        for (byte b : digest) out.append(String.format("%02x", b & 0xff));
+        return out.toString();
     }
 
     private static void acknowledge(Context context, String commandId) {
