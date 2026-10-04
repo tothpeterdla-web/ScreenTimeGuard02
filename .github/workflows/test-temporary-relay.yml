@@ -28,32 +28,83 @@ jobs:
       - name: Install Wrangler
         run: npm install --no-save wrangler@latest
 
-      - name: Create temporary Worker config
+      - name: Create bootstrap Worker config
         shell: bash
         run: |
           cat > remote/wrangler.temp.jsonc <<'EOF'
           {
             "name": "screentimeguard-remote",
             "main": "worker.js",
-            "compatibility_date": "2026-10-01",
-            "d1_databases": [
-              {
-                "binding": "DB",
-                "database_name": "screentimeguard-remote"
-              }
-            ]
+            "compatibility_date": "2026-10-01"
           }
           EOF
 
-      - name: Deploy to temporary Cloudflare account
-        id: deploy
+      - name: Bootstrap temporary Cloudflare account
+        id: bootstrap
         shell: bash
         working-directory: remote
         run: |
           set -euo pipefail
-          LOG="$RUNNER_TEMP/cloudflare-temporary-deploy.log"
+          LOG="$RUNNER_TEMP/cloudflare-bootstrap.log"
           if ! npx wrangler deploy --temporary --config wrangler.temp.jsonc >"$LOG" 2>&1; then
-            echo "Temporary Cloudflare deployment failed. Sanitized diagnostic:"
+            echo "Temporary Cloudflare bootstrap failed. Sanitized diagnostic:"
+            sed -E \
+              -e 's#https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+#<CLAIM_URL_REDACTED>#g' \
+              -e 's#https://[^[:space:]?]+\?[^[:space:]]+#<URL_WITH_QUERY_REDACTED>#g' \
+              "$LOG" | grep -Ei 'error|failed|temporary|unsupported|invalid|config|authentication|permission|require' | tail -40 || true
+            exit 1
+          fi
+
+          WORKER_URL=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' "$LOG" | tail -1 || true)
+          CLAIM_URL=$(grep -Eo 'https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+' "$LOG" | tail -1 || true)
+          if [ -z "$WORKER_URL" ] || [ -z "$CLAIM_URL" ]; then
+            echo "Temporary account was created, but deployment URLs could not be extracted."
+            exit 1
+          fi
+
+          echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "WORKER_URL=$WORKER_URL"
+            echo "CLAIM_URL=$CLAIM_URL"
+          } > "$RUNNER_TEMP/cloudflare-claim.txt"
+          echo "Temporary Cloudflare account bootstrapped; claim token kept out of logs." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create D1 database on temporary account
+        shell: bash
+        working-directory: remote
+        run: |
+          set -euo pipefail
+          LOG="$RUNNER_TEMP/cloudflare-d1-create.log"
+          if ! npx wrangler d1 create screentimeguard-remote \
+              --binding DB --update-config --config wrangler.temp.jsonc >"$LOG" 2>&1; then
+            echo "D1 creation failed. Sanitized diagnostic:"
+            sed -E \
+              -e 's#https://[^[:space:]?]+\?[^[:space:]]+#<URL_WITH_QUERY_REDACTED>#g' \
+              "$LOG" | grep -Ei 'error|failed|unsupported|invalid|config|binding|database|d1|authentication|permission|require' | tail -40 || true
+            exit 1
+          fi
+
+      - name: Apply D1 schema
+        shell: bash
+        working-directory: remote
+        run: |
+          set -euo pipefail
+          LOG="$RUNNER_TEMP/cloudflare-d1-schema.log"
+          if ! npx wrangler d1 execute screentimeguard-remote --remote \
+              --file=./schema.sql --yes --config wrangler.temp.jsonc >"$LOG" 2>&1; then
+            echo "D1 schema application failed."
+            grep -Ei 'error|failed|invalid|database|d1|authentication|permission|require' "$LOG" | tail -40 || true
+            exit 1
+          fi
+
+      - name: Deploy relay with D1 binding
+        shell: bash
+        working-directory: remote
+        run: |
+          set -euo pipefail
+          LOG="$RUNNER_TEMP/cloudflare-final-deploy.log"
+          if ! npx wrangler deploy --temporary --config wrangler.temp.jsonc >"$LOG" 2>&1; then
+            echo "Final Worker deployment failed. Sanitized diagnostic:"
             sed -E \
               -e 's#https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+#<CLAIM_URL_REDACTED>#g' \
               -e 's#https://[^[:space:]?]+\?[^[:space:]]+#<URL_WITH_QUERY_REDACTED>#g' \
@@ -61,27 +112,10 @@ jobs:
             exit 1
           fi
 
-          WORKER_URL=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' "$LOG" | tail -1 || true)
-          CLAIM_URL=$(grep -Eo 'https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+' "$LOG" | tail -1 || true)
-
-          if [ -z "$WORKER_URL" ] || [ -z "$CLAIM_URL" ]; then
-            echo "Deployment completed but Worker or claim URL could not be extracted."
-            exit 1
-          fi
-
-          echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
-
-          {
-            echo "WORKER_URL=$WORKER_URL"
-            echo "CLAIM_URL=$CLAIM_URL"
-          } > "$RUNNER_TEMP/cloudflare-claim.txt"
-
-          echo "Temporary Cloudflare deployment created. Claim URL is stored only in the private workflow artifact." >> "$GITHUB_STEP_SUMMARY"
-
       - name: End-to-end relay smoke test
         shell: bash
         env:
-          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+          WORKER_URL: ${{ steps.bootstrap.outputs.worker_url }}
         run: |
           set -euo pipefail
           curl --fail --silent --show-error "$WORKER_URL/" | grep -q "Parent remote control"
