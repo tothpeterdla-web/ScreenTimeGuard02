@@ -1,0 +1,135 @@
+name: Test Temporary Remote Relay
+
+on:
+  push:
+    branches: [ "feature/remote-parent-unlock" ]
+    paths:
+      - "remote/**"
+      - ".github/workflows/test-temporary-relay.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Wrangler
+        run: npm install --no-save wrangler@latest
+
+      - name: Create temporary Worker config
+        shell: bash
+        run: |
+          cat > remote/wrangler.temp.jsonc <<'EOF'
+          {
+            "name": "screentimeguard-remote",
+            "main": "worker.js",
+            "compatibility_date": "2026-10-01",
+            "d1_databases": [
+              {
+                "binding": "DB",
+                "database_name": "screentimeguard-remote"
+              }
+            ]
+          }
+          EOF
+
+      - name: Deploy to temporary Cloudflare account
+        id: deploy
+        shell: bash
+        working-directory: remote
+        run: |
+          set -euo pipefail
+          LOG="$RUNNER_TEMP/cloudflare-temporary-deploy.log"
+          if ! npx wrangler deploy --temporary --config wrangler.temp.jsonc >"$LOG" 2>&1; then
+            echo "Temporary Cloudflare deployment failed. Sensitive deployment output was intentionally not printed."
+            exit 1
+          fi
+
+          WORKER_URL=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' "$LOG" | tail -1 || true)
+          CLAIM_URL=$(grep -Eo 'https://dash\.cloudflare\.com/claim-preview\?claimToken=[^[:space:]]+' "$LOG" | tail -1 || true)
+
+          if [ -z "$WORKER_URL" ] || [ -z "$CLAIM_URL" ]; then
+            echo "Deployment completed but Worker or claim URL could not be extracted."
+            exit 1
+          fi
+
+          echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "WORKER_URL=$WORKER_URL"
+            echo "CLAIM_URL=$CLAIM_URL"
+          } > "$RUNNER_TEMP/cloudflare-claim.txt"
+
+          echo "Temporary Cloudflare deployment created. Claim URL is stored only in the private workflow artifact." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: End-to-end relay smoke test
+        shell: bash
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$WORKER_URL/" | grep -q "Parent remote control"
+
+          DEVICE="test-device-$(openssl rand -hex 8)"
+          SECRET=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
+          AUTH="Authorization: Bearer $SECRET"
+
+          REGISTER_CODE=$(curl --silent --show-error -o "$RUNNER_TEMP/register.json" -w '%{http_code}' \
+            -X POST "$WORKER_URL/v1/register" \
+            -H 'Content-Type: application/json' \
+            -H "$AUTH" \
+            --data "{\"deviceId\":\"$DEVICE\"}")
+          test "$REGISTER_CODE" = "201" -o "$REGISTER_CODE" = "200"
+
+          curl --fail --silent --show-error \
+            -X POST "$WORKER_URL/v1/unlock" \
+            -H 'Content-Type: application/json' \
+            -H "$AUTH" \
+            --data "{\"deviceId\":\"$DEVICE\",\"action\":\"allow_app_installs_15\"}" \
+            > "$RUNNER_TEMP/unlock.json"
+
+          curl --fail --silent --show-error \
+            "$WORKER_URL/v1/command?deviceId=$DEVICE" \
+            -H "$AUTH" > "$RUNNER_TEMP/command.json"
+
+          node -e '
+            const fs=require("fs");
+            const c=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/command.json","utf8"));
+            if(c.action!=="allow_app_installs_15" || c.minutes!==15 || !c.id) process.exit(1);
+            fs.writeFileSync(process.env.RUNNER_TEMP+"/command-id.txt", c.id);
+          '
+
+          COMMAND_ID=$(cat "$RUNNER_TEMP/command-id.txt")
+          curl --fail --silent --show-error \
+            -X POST "$WORKER_URL/v1/ack" \
+            -H 'Content-Type: application/json' \
+            -H "$AUTH" \
+            --data "{\"deviceId\":\"$DEVICE\",\"id\":\"$COMMAND_ID\"}" >/dev/null
+
+          curl --fail --silent --show-error \
+            -X POST "$WORKER_URL/v1/revoke" \
+            -H 'Content-Type: application/json' \
+            -H "$AUTH" \
+            --data "{\"deviceId\":\"$DEVICE\"}" >/dev/null
+
+          echo "Worker page, D1 registration, 15-minute app-install command, polling, acknowledgement and revoke all passed." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload claim details securely
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-temporary-claim
+          path: ${{ runner.temp }}/cloudflare-claim.txt
+          if-no-files-found: error
+          retention-days: 1
