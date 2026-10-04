@@ -32,6 +32,7 @@ public class RemoteControlActivity extends Activity {
     private EditText relayUrl;
     private TextView status;
     private TextView deviceId;
+    private String verifiedGuardianPin = "";
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -84,7 +85,9 @@ public class RemoteControlActivity extends Activity {
 
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> {
-                    if (PinStore.verify(this, pin.getText().toString())) {
+                    String enteredPin = pin.getText().toString();
+                    if (PinStore.verify(this, enteredPin)) {
+                        verifiedGuardianPin = enteredPin;
                         dialog.dismiss();
                         RemoteUnlockConfig.ensureCredentials(this);
                         buildUi();
@@ -108,7 +111,7 @@ public class RemoteControlActivity extends Activity {
         root.setBackgroundColor(BG);
 
         root.addView(text("Parent remote unlock", 28, TEXT, true));
-        root.addView(text("Pair a guardian phone so it can grant temporary screen-time overrides remotely. Remote control cannot disable Device Owner, uninstall protection, or change the guardian PIN.",
+        root.addView(text("Pair guardian phones so they can grant temporary screen-time overrides or a 15-minute app-install window. Every browser must enter the same guardian PIN before the remote controls are shown.",
                 14, MUTED, false), full(0, 6, 0, 18));
 
         LinearLayout card = card();
@@ -143,7 +146,7 @@ public class RemoteControlActivity extends Activity {
         disable.setOnClickListener(v -> disableRemote());
         card.addView(disable, buttonLp());
 
-        card.addView(text("The pairing secret is 256-bit random. The link keeps it in the URL fragment, so browsers do not send the secret to the web server while opening the parent page. Send the link only to the guardian device.",
+        card.addView(text("The pairing link can be used on multiple guardian devices. The link contains the random pairing secret, but each browser must also know the guardian PIN. The PIN itself is never stored by the relay.",
                 12, MUTED, false), full(0, 10, 0, 0));
 
         root.addView(card, new LinearLayout.LayoutParams(
@@ -157,11 +160,15 @@ public class RemoteControlActivity extends Activity {
             Toast.makeText(this, "Enter a valid HTTPS relay URL", Toast.LENGTH_LONG).show();
             return;
         }
+        if (verifiedGuardianPin.isEmpty()) {
+            Toast.makeText(this, "Reopen this screen and enter the guardian PIN again", Toast.LENGTH_LONG).show();
+            return;
+        }
         RemoteUnlockConfig.setBaseUrl(this, normalized);
         RemoteUnlockConfig.ensureCredentials(this);
         status.setText("Registering…");
         status.setTextColor(MUTED);
-        RemoteUnlockClient.registerAsync(this, (ok, message) -> {
+        RemoteUnlockClient.registerAsync(this, verifiedGuardianPin, (ok, message) -> {
             RemoteUnlockConfig.setEnabled(this, ok);
             status.setText(message);
             status.setTextColor(ok ? GOOD : DANGER);
