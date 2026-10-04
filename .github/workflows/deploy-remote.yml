@@ -1,0 +1,117 @@
+name: Deploy Screen Time Guard Remote Relay
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DB_NAME: screentimeguard-remote
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check Cloudflare credentials
+        shell: bash
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || (echo "Missing CLOUDFLARE_API_TOKEN repository secret" && exit 1)
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || (echo "Missing CLOUDFLARE_ACCOUNT_ID repository secret" && exit 1)
+
+      - name: Install Wrangler
+        run: npm install --no-save wrangler@latest
+
+      - name: Find or create D1 database
+        shell: bash
+        working-directory: remote
+        run: |
+          set -euo pipefail
+
+          npx wrangler d1 list --json > "$RUNNER_TEMP/d1-list.json"
+          DB_ID=$(node -e '
+            const fs = require("fs");
+            const rows = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/d1-list.json", "utf8"));
+            const db = rows.find(x => x.name === process.env.DB_NAME);
+            process.stdout.write(db ? String(db.uuid || db.id || "") : "");
+          ')
+
+          if [ -z "$DB_ID" ]; then
+            echo "Creating D1 database: $DB_NAME"
+            npx wrangler d1 create "$DB_NAME" --jurisdiction eu
+            npx wrangler d1 list --json > "$RUNNER_TEMP/d1-list.json"
+            DB_ID=$(node -e '
+              const fs = require("fs");
+              const rows = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/d1-list.json", "utf8"));
+              const db = rows.find(x => x.name === process.env.DB_NAME);
+              process.stdout.write(db ? String(db.uuid || db.id || "") : "");
+            ')
+          else
+            echo "Using existing D1 database: $DB_NAME"
+          fi
+
+          if [ -z "$DB_ID" ]; then
+            echo "Could not determine D1 database ID"
+            exit 1
+          fi
+
+          echo "DB_ID=$DB_ID" >> "$GITHUB_ENV"
+          echo "D1 database ready."
+
+      - name: Generate Worker config
+        shell: bash
+        working-directory: remote
+        run: |
+          cat > wrangler.toml <<EOF
+          name = "screentimeguard-remote"
+          main = "worker.js"
+          compatibility_date = "2026-10-01"
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "$DB_NAME"
+          database_id = "$DB_ID"
+          EOF
+
+      - name: Apply D1 schema
+        working-directory: remote
+        run: npx wrangler d1 execute "$DB_NAME" --remote --file=./schema.sql --yes
+
+      - name: Deploy Worker
+        id: deploy
+        shell: bash
+        working-directory: remote
+        run: |
+          set -euo pipefail
+          npx wrangler deploy 2>&1 | tee "$RUNNER_TEMP/wrangler-deploy.txt"
+          WORKER_URL=$(grep -Eo 'https://[^ ]+\.workers\.dev' "$RUNNER_TEMP/wrangler-deploy.txt" | tail -1 || true)
+          if [ -n "$WORKER_URL" ]; then
+            echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
+            echo "## Screen Time Guard remote relay" >> "$GITHUB_STEP_SUMMARY"
+            echo "Deployed successfully:" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "$WORKER_URL" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Worker deployed, but the workers.dev URL could not be parsed from Wrangler output." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Smoke test relay
+        if: steps.deploy.outputs.worker_url != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='${{ steps.deploy.outputs.worker_url }}'
+          BODY=$(curl --fail --silent --show-error "$URL/")
+          echo "$BODY" | grep -q "Parent remote unlock"
+          echo "Relay smoke test passed." >> "$GITHUB_STEP_SUMMARY"
