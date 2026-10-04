@@ -1,4 +1,5 @@
 const COMMAND_TTL_MS = 2 * 60 * 1000;
+const MAX_PIN_ATTEMPTS_PER_DAY = 3;
 let schemaReady = null;
 
 export default {
@@ -17,6 +18,9 @@ export default {
 
       if (url.pathname === "/v1/register" && request.method === "POST") {
         return cors(await registerDevice(request, env));
+      }
+      if (url.pathname === "/v1/verify-pin" && request.method === "POST") {
+        return cors(await verifyPin(request, env));
       }
       if (url.pathname === "/v1/unlock" && request.method === "POST") {
         return cors(await createUnlock(request, env));
@@ -40,17 +44,31 @@ export default {
 
 async function ensureSchema(env) {
   if (!schemaReady) {
-    schemaReady = env.DB.batch([
-      env.DB.prepare(
-        "CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, created_at INTEGER NOT NULL)"
-      ),
-      env.DB.prepare(
-        "CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, action TEXT NOT NULL, minutes INTEGER, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE)"
-      ),
-      env.DB.prepare(
-        "CREATE INDEX IF NOT EXISTS idx_commands_device_pending ON commands(device_id, consumed_at, created_at DESC)"
-      )
-    ]).catch(error => {
+    schemaReady = (async () => {
+      await env.DB.batch([
+        env.DB.prepare(
+          "CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, guardian_proof TEXT, pin_attempt_day TEXT, pin_failed_attempts INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)"
+        ),
+        env.DB.prepare(
+          "CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, action TEXT NOT NULL, minutes INTEGER, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE)"
+        ),
+        env.DB.prepare(
+          "CREATE INDEX IF NOT EXISTS idx_commands_device_pending ON commands(device_id, consumed_at, created_at DESC)"
+        )
+      ]);
+
+      const info = await env.DB.prepare("PRAGMA table_info(devices)").all();
+      const columns = new Set((info.results || []).map(row => String(row.name)));
+      if (!columns.has("guardian_proof")) {
+        await env.DB.prepare("ALTER TABLE devices ADD COLUMN guardian_proof TEXT").run();
+      }
+      if (!columns.has("pin_attempt_day")) {
+        await env.DB.prepare("ALTER TABLE devices ADD COLUMN pin_attempt_day TEXT").run();
+      }
+      if (!columns.has("pin_failed_attempts")) {
+        await env.DB.prepare("ALTER TABLE devices ADD COLUMN pin_failed_attempts INTEGER NOT NULL DEFAULT 0").run();
+      }
+    })().catch(error => {
       schemaReady = null;
       throw error;
     });
@@ -61,31 +79,56 @@ async function ensureSchema(env) {
 async function registerDevice(request, env) {
   const body = await readJson(request);
   const deviceId = validDeviceId(body.deviceId);
+  const guardianProof = validGuardianProof(body.guardianProof);
   const secret = bearer(request);
-  if (!deviceId || !validSecret(secret)) return json({ error: "bad_request" }, 400);
+  if (!deviceId || !guardianProof || !validSecret(secret)) return json({ error: "bad_request" }, 400);
 
   const hash = await sha256(secret);
   const existing = await env.DB.prepare(
-    "SELECT secret_hash FROM devices WHERE device_id = ?"
+    "SELECT secret_hash, guardian_proof FROM devices WHERE device_id = ?"
   ).bind(deviceId).first();
 
   if (existing) {
     if (!timingSafeEqual(existing.secret_hash, hash)) return json({ error: "device_already_registered" }, 409);
+    if (!existing.guardian_proof || !timingSafeEqual(existing.guardian_proof, guardianProof)) {
+      return json({ error: "guardian_pin_changed_repair_required" }, 409);
+    }
     return json({ ok: true });
   }
 
   await env.DB.prepare(
-    "INSERT INTO devices(device_id, secret_hash, created_at) VALUES (?, ?, ?)"
-  ).bind(deviceId, hash, Date.now()).run();
+    "INSERT INTO devices(device_id, secret_hash, guardian_proof, pin_attempt_day, pin_failed_attempts, created_at) VALUES (?, ?, ?, ?, 0, ?)"
+  ).bind(deviceId, hash, guardianProof, utcDay(), Date.now()).run();
   return json({ ok: true }, 201);
+}
+
+async function verifyPin(request, env) {
+  const body = await readJson(request);
+  const deviceId = validDeviceId(body.deviceId);
+  const guardianProof = validGuardianProof(body.guardianProof);
+  const secret = bearer(request);
+  if (!deviceId || !guardianProof || !validSecret(secret)) return json({ error: "bad_request" }, 400);
+  if (!(await authorized(env, deviceId, secret))) return json({ error: "unauthorized" }, 401);
+
+  const result = await checkGuardianProof(env, deviceId, guardianProof);
+  if (result.ok) return json({ ok: true });
+  if (result.locked) return json({ error: "pin_locked", attemptsRemaining: 0 }, 423);
+  return json({ error: "wrong_pin", attemptsRemaining: result.remaining }, 401);
 }
 
 async function createUnlock(request, env) {
   const body = await readJson(request);
   const deviceId = validDeviceId(body.deviceId);
   const secret = bearer(request);
-  if (!deviceId || !validSecret(secret)) return json({ error: "bad_request" }, 400);
+  const guardianProof = validGuardianProof(request.headers.get("x-guardian-proof"));
+  if (!deviceId || !validSecret(secret) || !guardianProof) return json({ error: "bad_request" }, 400);
   if (!(await authorized(env, deviceId, secret))) return json({ error: "unauthorized" }, 401);
+
+  const pinResult = await checkGuardianProof(env, deviceId, guardianProof);
+  if (!pinResult.ok) {
+    if (pinResult.locked) return json({ error: "pin_locked", attemptsRemaining: 0 }, 423);
+    return json({ error: "wrong_pin", attemptsRemaining: pinResult.remaining }, 401);
+  }
 
   let action = String(body.action || "");
   let minutes = null;
@@ -165,6 +208,43 @@ async function revoke(request, env) {
   return json({ ok: true });
 }
 
+async function checkGuardianProof(env, deviceId, suppliedProof) {
+  const row = await env.DB.prepare(
+    "SELECT guardian_proof, pin_attempt_day, pin_failed_attempts FROM devices WHERE device_id = ?"
+  ).bind(deviceId).first();
+  if (!row || !row.guardian_proof) return { ok: false, locked: true, remaining: 0 };
+
+  const today = utcDay();
+  let failed = Number(row.pin_failed_attempts || 0);
+  if (row.pin_attempt_day !== today) {
+    failed = 0;
+    await env.DB.prepare(
+      "UPDATE devices SET pin_attempt_day = ?, pin_failed_attempts = 0 WHERE device_id = ?"
+    ).bind(today, deviceId).run();
+  }
+
+  if (failed >= MAX_PIN_ATTEMPTS_PER_DAY) return { ok: false, locked: true, remaining: 0 };
+
+  if (timingSafeEqual(row.guardian_proof, suppliedProof)) {
+    if (failed !== 0) {
+      await env.DB.prepare(
+        "UPDATE devices SET pin_attempt_day = ?, pin_failed_attempts = 0 WHERE device_id = ?"
+      ).bind(today, deviceId).run();
+    }
+    return { ok: true, locked: false, remaining: MAX_PIN_ATTEMPTS_PER_DAY };
+  }
+
+  failed += 1;
+  await env.DB.prepare(
+    "UPDATE devices SET pin_attempt_day = ?, pin_failed_attempts = ? WHERE device_id = ?"
+  ).bind(today, failed, deviceId).run();
+  return {
+    ok: false,
+    locked: failed >= MAX_PIN_ATTEMPTS_PER_DAY,
+    remaining: Math.max(0, MAX_PIN_ATTEMPTS_PER_DAY - failed)
+  };
+}
+
 async function authorized(env, deviceId, secret) {
   const row = await env.DB.prepare(
     "SELECT secret_hash FROM devices WHERE device_id = ?"
@@ -186,6 +266,16 @@ function validDeviceId(value) {
 
 function validSecret(value) {
   return typeof value === "string" && /^[a-zA-Z0-9_-]{32,128}$/.test(value);
+}
+
+function validGuardianProof(value) {
+  if (typeof value !== "string") return "";
+  const v = value.trim().toLowerCase();
+  return /^[0-9a-f]{64}$/.test(v) ? v : "";
+}
+
+function utcDay() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 async function sha256(value) {
@@ -215,7 +305,7 @@ function json(body, status = 200) {
 function cors(response) {
   const h = new Headers(response.headers);
   h.set("access-control-allow-origin", "*");
-  h.set("access-control-allow-headers", "authorization, content-type");
+  h.set("access-control-allow-headers", "authorization, content-type, x-guardian-proof");
   h.set("access-control-allow-methods", "GET, POST, OPTIONS");
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers: h });
 }
@@ -231,11 +321,18 @@ function parentPage() {
 </head>
 <body><main class="card">
 <h1>Parent remote control</h1>
-<p>Temporary screen-time overrides and a 15-minute app-install window are available here. Device Owner, uninstall protection and the guardian PIN cannot be disabled remotely.</p>
+<p>The pairing link can be opened on multiple phones or computers, but the guardian PIN is required each time the page is opened. The PIN is not saved in the browser or stored by the relay.</p>
 <div id="setup">
 <input id="device" placeholder="Device ID" autocomplete="off">
 <input id="secret" placeholder="Pairing secret" autocomplete="off">
-<button class="primary" onclick="pair()">Pair this phone</button>
+<button class="primary" onclick="pair()">Pair this device</button>
+</div>
+<div id="pinGate" class="hidden">
+<div class="status">Paired device<br><span id="pinDeviceLabel" class="small"></span></div>
+<input id="guardianPin" type="password" inputmode="numeric" placeholder="Guardian PIN" autocomplete="off">
+<button class="primary" onclick="verifyGuardianPin()">Unlock remote controls</button>
+<div id="pinResult" class="status">Enter the guardian PIN.</div>
+<button onclick="forget()">Forget this device</button>
 </div>
 <div id="controls" class="hidden">
 <div class="status">Paired device<br><span id="deviceLabel" class="small"></span></div>
@@ -249,17 +346,23 @@ function parentPage() {
 <h2>App installation</h2>
 <button class="primary" onclick="allowAppInstalls()">Allow app installs for 15 min</button>
 <div id="result" class="status">Ready.</div>
-<button onclick="forget()">Forget this phone</button>
+<button onclick="lockControls()">Lock controls</button>
+<button onclick="forget()">Forget this device</button>
 </div>
 <script>
 const key='stg_parent_pairing_v1';
+const proofPrefix='stg-remote-pin-v1|';
 let pairing=null;
+let guardianProof=null;
 function parseHash(){const p=new URLSearchParams(location.hash.slice(1));const d=p.get('device'),s=p.get('secret');if(d&&s){localStorage.setItem(key,JSON.stringify({device:d,secret:s}));history.replaceState(null,'',location.pathname);}}
 function load(){parseHash();try{pairing=JSON.parse(localStorage.getItem(key)||'null')}catch{};render();}
-function pair(){const device=document.getElementById('device').value.trim(),secret=document.getElementById('secret').value.trim();if(!device||!secret)return;pairing={device,secret};localStorage.setItem(key,JSON.stringify(pairing));render();}
-function forget(){localStorage.removeItem(key);pairing=null;render();}
-function render(){document.getElementById('setup').classList.toggle('hidden',!!pairing);document.getElementById('controls').classList.toggle('hidden',!pairing);if(pairing)document.getElementById('deviceLabel').textContent=pairing.device;}
-async function send(body,message){const out=document.getElementById('result');out.className='status';out.textContent='Sending…';try{const r=await fetch('/v1/unlock',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+pairing.secret},body:JSON.stringify({deviceId:pairing.device,...body})});if(!r.ok)throw new Error('Request failed ('+r.status+')');out.className='status ok';out.textContent=message;}catch(e){out.className='status bad';out.textContent=e.message;}}
+function pair(){const device=document.getElementById('device').value.trim(),secret=document.getElementById('secret').value.trim();if(!device||!secret)return;pairing={device,secret};guardianProof=null;localStorage.setItem(key,JSON.stringify(pairing));render();}
+function forget(){localStorage.removeItem(key);pairing=null;guardianProof=null;render();}
+function lockControls(){guardianProof=null;document.getElementById('guardianPin').value='';render();}
+function render(){const paired=!!pairing,unlocked=paired&&!!guardianProof;document.getElementById('setup').classList.toggle('hidden',paired);document.getElementById('pinGate').classList.toggle('hidden',!paired||unlocked);document.getElementById('controls').classList.toggle('hidden',!unlocked);if(paired){document.getElementById('pinDeviceLabel').textContent=pairing.device;document.getElementById('deviceLabel').textContent=pairing.device;}}
+async function makeProof(pin){const bytes=new TextEncoder().encode(proofPrefix+pairing.secret+'|'+pin);const digest=await crypto.subtle.digest('SHA-256',bytes);return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');}
+async function verifyGuardianPin(){const out=document.getElementById('pinResult');const pin=document.getElementById('guardianPin').value;out.className='status';out.textContent='Checking…';if(!pin)return;try{const proof=await makeProof(pin);const r=await fetch('/v1/verify-pin',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+pairing.secret},body:JSON.stringify({deviceId:pairing.device,guardianProof:proof})});let data={};try{data=await r.json()}catch{};if(r.ok){guardianProof=proof;document.getElementById('guardianPin').value='';out.className='status ok';out.textContent='PIN accepted.';render();return;}if(r.status===423){out.className='status bad';out.textContent='3 wrong attempts. Remote PIN is locked until tomorrow.';return;}const remaining=Number.isInteger(data.attemptsRemaining)?data.attemptsRemaining:null;out.className='status bad';out.textContent=remaining===null?'Wrong guardian PIN.':'Wrong guardian PIN · '+remaining+' attempt'+(remaining===1?'':'s')+' remaining today.';}catch(e){out.className='status bad';out.textContent='Could not reach the relay.';}}
+async function send(body,message){const out=document.getElementById('result');out.className='status';out.textContent='Sending…';try{const r=await fetch('/v1/unlock',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+pairing.secret,'x-guardian-proof':guardianProof},body:JSON.stringify({deviceId:pairing.device,...body})});let data={};try{data=await r.json()}catch{};if(!r.ok){if(r.status===401||r.status===423){guardianProof=null;render();}throw new Error(r.status===423?'Remote PIN locked until tomorrow.':'Request failed ('+r.status+')');}out.className='status ok';out.textContent=message;}catch(e){out.className='status bad';out.textContent=e.message;}}
 function unlockMinutes(minutes){send({action:'unlock_for_minutes',minutes},'Screen-time unlock command sent.');}
 function unlockMidnight(){send({action:'unlock_until_midnight'},'Screen-time unlock command sent.');}
 function allowAppInstalls(){send({action:'allow_app_installs_15'},'App installations allowed for 15 minutes.');}
