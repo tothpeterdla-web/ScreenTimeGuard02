@@ -15,8 +15,8 @@ android {
         applicationId "com.example.screentimeguard"
         minSdk 28
         targetSdk 35
-        versionCode 10
-        versionName "10.0-parent-remote-test"
+        versionCode 11
+        versionName "11.0-parent-remote-pin"
     }
 
     signingConfigs {
