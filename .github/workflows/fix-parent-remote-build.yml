@@ -1,0 +1,44 @@
+name: Fix parent remote build
+
+on:
+  push:
+    branches: [ "feature/remote-parent-unlock" ]
+    paths:
+      - ".github/workflows/fix-parent-remote-build.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/remote-parent-unlock
+
+      - name: Restore PIN-at-registration client contract
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/com/example/screentimeguard/RemoteUnlockClient.java')
+          s = p.read_text()
+          s = s.replace('public static void registerAsync(Context context, Callback callback) {',
+                        'public static void registerAsync(Context context, String guardianPin, Callback callback) {', 1)
+          s = s.replace('''            try {\n                if (!PinStore.hasPin(app)) {\n                    throw new IllegalStateException("guardian_pin_missing");\n                }\n                RemoteUnlockConfig.ensureCredentials(app);\n                String secret = RemoteUnlockConfig.getSecret(app);\n                String verifier = PinStore.remotePinVerifier(app);\n                String salt = PinStore.remotePinSalt(app);\n                if (verifier.isEmpty() || salt.isEmpty()) {\n                    throw new IllegalStateException("guardian_pin_missing");\n                }\n\n                JSONObject body = new JSONObject();\n                body.put("deviceId", RemoteUnlockConfig.getDeviceId(app));\n                body.put("guardianProof", guardianProof(secret, verifier));\n                body.put("pinSalt", salt);\n                body.put("pinIterations", PinStore.remotePinIterations());\n''', '''            try {\n                RemoteUnlockConfig.ensureCredentials(app);\n                String secret = RemoteUnlockConfig.getSecret(app);\n                JSONObject body = new JSONObject();\n                body.put("deviceId", RemoteUnlockConfig.getDeviceId(app));\n                body.put("guardianProof", guardianProof(secret, guardianPin));\n''', 1)
+          s = s.replace('''                } else if (code == 409) {\n                    message = "Remote pairing needs to be refreshed";\n                } else {''', '''                } else if (code == 409) {\n                    message = "Remote PIN changed. Revoke the old pairing, then enable it again.";\n                } else {''', 1)
+          s = s.replace('''                }\n            } catch (IllegalStateException e) {\n                message = "Set a guardian PIN before enabling parent remote";\n            } catch (Exception e) {''', '''                }\n            } catch (Exception e) {''', 1)
+          s = s.replace('''    private static String guardianProof(String secret, String verifier) throws Exception {\n        String input = PIN_PROOF_PREFIX + secret + "|" + verifier;''', '''    private static String guardianProof(String secret, String pin) throws Exception {\n        String input = PIN_PROOF_PREFIX + secret + "|" + pin;''', 1)
+          p.write_text(s)
+          Path('.github/workflows/fix-parent-remote-build.yml').unlink()
+          PY
+
+      - name: Commit changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Keep existing remote PIN protocol" || exit 0
+          git push origin HEAD:feature/remote-parent-unlock
