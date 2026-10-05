@@ -92,28 +92,17 @@ public final class RemoteUnlockClient {
         }, "remote-unlock-poll").start();
     }
 
-    public static void registerAsync(Context context, Callback callback) {
+    public static void registerAsync(Context context, String guardianPin, Callback callback) {
         Context app = context.getApplicationContext();
         new Thread(() -> {
             boolean ok = false;
             String message;
             try {
-                if (!PinStore.hasPin(app)) {
-                    throw new IllegalStateException("guardian_pin_missing");
-                }
                 RemoteUnlockConfig.ensureCredentials(app);
                 String secret = RemoteUnlockConfig.getSecret(app);
-                String verifier = PinStore.remotePinVerifier(app);
-                String salt = PinStore.remotePinSalt(app);
-                if (verifier.isEmpty() || salt.isEmpty()) {
-                    throw new IllegalStateException("guardian_pin_missing");
-                }
-
                 JSONObject body = new JSONObject();
                 body.put("deviceId", RemoteUnlockConfig.getDeviceId(app));
-                body.put("guardianProof", guardianProof(secret, verifier));
-                body.put("pinSalt", salt);
-                body.put("pinIterations", PinStore.remotePinIterations());
+                body.put("guardianProof", guardianProof(secret, guardianPin));
 
                 HttpURLConnection c = connection(
                         RemoteUnlockConfig.getBaseUrl(app) + "/v1/register",
@@ -124,12 +113,10 @@ public final class RemoteUnlockClient {
                 if (ok) {
                     message = "Remote unlock is ready";
                 } else if (code == 409) {
-                    message = "Remote pairing needs to be refreshed";
+                    message = "Remote PIN changed. Revoke the old pairing, then enable it again.";
                 } else {
                     message = "Relay rejected registration (" + code + ")";
                 }
-            } catch (IllegalStateException e) {
-                message = "Set a guardian PIN before enabling parent remote";
             } catch (Exception e) {
                 message = "Could not reach the remote unlock relay";
             }
@@ -163,8 +150,8 @@ public final class RemoteUnlockClient {
         }, "remote-unlock-revoke").start();
     }
 
-    private static String guardianProof(String secret, String verifier) throws Exception {
-        String input = PIN_PROOF_PREFIX + secret + "|" + verifier;
+    private static String guardianProof(String secret, String pin) throws Exception {
+        String input = PIN_PROOF_PREFIX + secret + "|" + pin;
         byte[] digest = MessageDigest.getInstance("SHA-256")
                 .digest(input.getBytes(StandardCharsets.UTF_8));
         StringBuilder out = new StringBuilder(digest.length * 2);
