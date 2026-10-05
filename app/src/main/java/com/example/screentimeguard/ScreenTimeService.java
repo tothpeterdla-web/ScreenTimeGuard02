@@ -131,11 +131,9 @@ public class ScreenTimeService extends Service {
         PendingIntent installPi = PendingIntent.getActivity(this, 1, installIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-
         String installAction = Prefs.isInstallWindowActive(this)
                 ? "App installs: enabled"
                 : "App installations";
-
 
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
