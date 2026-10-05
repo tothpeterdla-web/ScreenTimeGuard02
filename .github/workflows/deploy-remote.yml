@@ -1,6 +1,11 @@
 name: Deploy Screen Time Guard Remote Relay
 
 on:
+  push:
+    branches: [ "feature/remote-parent-unlock" ]
+    paths:
+      - "remote/**"
+      - ".github/workflows/deploy-remote.yml"
   workflow_dispatch:
 
 permissions:
@@ -113,5 +118,6 @@ jobs:
           set -euo pipefail
           URL='${{ steps.deploy.outputs.worker_url }}'
           BODY=$(curl --fail --silent --show-error "$URL/")
-          echo "$BODY" | grep -q "Parent remote unlock"
+          echo "$BODY" | grep -q "Parent remote control"
+          echo "$BODY" | grep -q "guardian PIN"
           echo "Relay smoke test passed." >> "$GITHUB_STEP_SUMMARY"
