@@ -2,6 +2,8 @@ CREATE TABLE IF NOT EXISTS devices (
     device_id TEXT PRIMARY KEY,
     secret_hash TEXT NOT NULL,
     guardian_proof TEXT NOT NULL,
+    pin_salt TEXT,
+    pin_iterations INTEGER,
     pin_attempt_day TEXT,
     pin_failed_attempts INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
