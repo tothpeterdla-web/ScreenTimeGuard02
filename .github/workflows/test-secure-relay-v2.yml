@@ -48,7 +48,7 @@ jobs:
             d1_databases:[{binding:'DB',database_name:'screentimeguard-remote-v2',database_id:id}]
           },null,2));
           NODE
-          npx wrangler d1 execute screentimeguard-remote-v2 --remote --file=./schema.sql --yes --config wrangler.temp.jsonc
+          npx wrangler d1 execute screentimeguard-remote-v2 --remote --temporary --file=./schema.sql --yes --config wrangler.temp.jsonc
 
       - name: Deploy bound relay
         id: deploy
