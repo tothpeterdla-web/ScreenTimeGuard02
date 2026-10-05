@@ -39,70 +39,11 @@ public class RemoteControlActivity extends Activity {
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
 
-        LinearLayout locked = new LinearLayout(this);
-        locked.setBackgroundColor(BG);
-        setContentView(locked);
-        authorizeSetup();
+        RemoteUnlockConfig.ensureCredentials(this);
+        buildUi();
+        refresh();
     }
 
-    private void authorizeSetup() {
-        if (!PinStore.hasPin(this)) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Guardian PIN required")
-                    .setMessage("Set a guardian PIN in Screen Time Guard first.")
-                    .setPositiveButton("OK", (d, w) -> finish())
-                    .setOnCancelListener(d -> finish())
-                    .show();
-            return;
-        }
-
-        if (PinStore.isLockedForToday(this)) {
-            Toast.makeText(this, "Guardian PIN locked for today. Try again tomorrow.", Toast.LENGTH_LONG).show();
-            finish();
-            return;
-        }
-
-        EditText pin = new EditText(this);
-        pin.setHint("Guardian PIN");
-        pin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-        pin.setSingleLine(true);
-        pin.setTextColor(TEXT);
-        pin.setHintTextColor(MUTED);
-        pin.setPadding(dp(12), dp(10), dp(12), dp(10));
-
-        LinearLayout holder = new LinearLayout(this);
-        holder.setPadding(dp(18), 0, dp(18), 0);
-        holder.addView(pin, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Guardian authorization")
-                .setView(holder)
-                .setPositiveButton("Continue", null)
-                .setNegativeButton("Cancel", (d, w) -> finish())
-                .setOnCancelListener(d -> finish())
-                .create();
-
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-                .setOnClickListener(v -> {
-                    String enteredPin = pin.getText().toString();
-                    if (PinStore.verify(this, enteredPin)) {
-                        verifiedGuardianPin = enteredPin;
-                        dialog.dismiss();
-                        RemoteUnlockConfig.ensureCredentials(this);
-                        buildUi();
-                        refresh();
-                    } else if (PinStore.isLockedForToday(this)) {
-                        dialog.dismiss();
-                        Toast.makeText(this, "Guardian PIN locked for today. Try again tomorrow.", Toast.LENGTH_LONG).show();
-                        finish();
-                    } else {
-                        Toast.makeText(this, "Wrong PIN", Toast.LENGTH_SHORT).show();
-                        pin.setText("");
-                    }
-                }));
-        dialog.show();
-    }
 
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
@@ -160,20 +101,61 @@ public class RemoteControlActivity extends Activity {
             Toast.makeText(this, "Enter a valid HTTPS relay URL", Toast.LENGTH_LONG).show();
             return;
         }
-        if (verifiedGuardianPin.isEmpty()) {
-            Toast.makeText(this, "Reopen this screen and enter the guardian PIN again", Toast.LENGTH_LONG).show();
-            return;
-        }
         RemoteUnlockConfig.setBaseUrl(this, normalized);
         RemoteUnlockConfig.ensureCredentials(this);
-        status.setText("Registering…");
-        status.setTextColor(MUTED);
-        RemoteUnlockClient.registerAsync(this, verifiedGuardianPin, (ok, message) -> {
-            RemoteUnlockConfig.setEnabled(this, ok);
-            status.setText(message);
-            status.setTextColor(ok ? GOOD : DANGER);
-            refresh();
-        });
+        requestPinForRemoteRegistration();
+    }
+
+    private void requestPinForRemoteRegistration() {
+        if (!PinStore.hasPin(this)) {
+            Toast.makeText(this, "Set a guardian PIN in Screen Time Guard first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (PinStore.isLockedForToday(this)) {
+            Toast.makeText(this, "Guardian PIN locked for today. Try again tomorrow.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        EditText pin = new EditText(this);
+        pin.setHint("Guardian PIN");
+        pin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pin.setSingleLine(true);
+        pin.setTextColor(TEXT);
+        pin.setHintTextColor(MUTED);
+        pin.setPadding(dp(12), dp(10), dp(12), dp(10));
+
+        LinearLayout holder = new LinearLayout(this);
+        holder.setPadding(dp(18), 0, dp(18), 0);
+        holder.addView(pin, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Guardian authorization")
+                .setView(holder)
+                .setPositiveButton("Continue", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    String entered = pin.getText().toString();
+                    if (!PinStore.verify(this, entered)) {
+                        pin.setText("");
+                        if (PinStore.isLockedForToday(this)) dialog.dismiss();
+                        return;
+                    }
+                    verifiedGuardianPin = entered;
+                    dialog.dismiss();
+                    status.setText("Registering…");
+                    status.setTextColor(MUTED);
+                    RemoteUnlockClient.registerAsync(this, verifiedGuardianPin, (ok, message) -> {
+                        RemoteUnlockConfig.setEnabled(this, ok);
+                        status.setText(message);
+                        status.setTextColor(ok ? GOOD : DANGER);
+                        verifiedGuardianPin = "";
+                        refresh();
+                    });
+                }));
+        dialog.show();
     }
 
     private void copyPairingLink() {

@@ -263,6 +263,11 @@ public class MainActivity extends Activity {
                 startActivity(new Intent(this, InstallControlActivity.class)));
         root.addView(installControl, actionLp());
 
+        Button parentRemote = actionButton("⌁   Parent remote", ACCENT);
+        parentRemote.setOnClickListener(v ->
+                startActivity(new Intent(this, RemoteControlActivity.class)));
+        root.addView(parentRemote, actionLp());
+
         Button messengerGuard = actionButton("⊘   Messenger link blocker", ACCENT);
         messengerGuard.setOnClickListener(v -> {
             new AlertDialog.Builder(this)
