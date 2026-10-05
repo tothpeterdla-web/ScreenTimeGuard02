@@ -15,8 +15,8 @@ android {
         applicationId "com.example.screentimeguard"
         minSdk 28
         targetSdk 35
-        versionCode 9
-        versionName "9.0-remove-guardian-auth-proof"
+        versionCode 12
+        versionName "12.0-parent-remote-app-access"
     }
 
     signingConfigs {

@@ -57,6 +57,8 @@ public class ScreenTimeService extends Service {
 
         boolean owner = PolicyUtils.isDeviceOwner(this);
         boolean enabled = Prefs.isEnabled(this);
+        if (owner) RemoteUnlockClient.poll(this);
+
         boolean override = Prefs.isOverrideActive(this);
         long used = ScreenTimeTracker.sample(this);
         long limit = Prefs.getLimitMinutes(this) * 60_000L;
@@ -97,7 +99,7 @@ public class ScreenTimeService extends Service {
 
         if (override) {
             if (PolicyUtils.isRestrictedModeActive(this)) PolicyUtils.clearRestrictedMode(this);
-            update(counter + " · guardian override until midnight");
+            update(counter + " · guardian override active");
             return;
         }
 

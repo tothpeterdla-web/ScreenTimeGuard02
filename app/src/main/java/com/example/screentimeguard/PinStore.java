@@ -79,6 +79,20 @@ public final class PinStore {
         return Math.max(0, MAX_FAILED_ATTEMPTS_PER_DAY - failed);
     }
 
+    public static int remotePinIterations() {
+        return ITERATIONS;
+    }
+
+    public static String remotePinSalt(Context context) {
+        if (!hasPin(context)) return "";
+        return prefs(context).getString(KEY_SALT, "");
+    }
+
+    public static String remotePinVerifier(Context context) {
+        if (!hasPin(context)) return "";
+        return prefs(context).getString(KEY_HASH, "");
+    }
+
     public static boolean verify(Context context, String pin) {
         if (!hasPin(context) || pin == null) return false;
         ensureAttemptDay(context);
