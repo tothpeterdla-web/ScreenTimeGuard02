@@ -1,0 +1,90 @@
+name: Apply parent remote UI fix
+
+on:
+  push:
+    branches: [ "feature/remote-parent-unlock" ]
+    paths:
+      - ".github/workflows/apply-parent-remote-ui-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/remote-parent-unlock
+
+      - name: Patch parent remote access
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          # 1) Parent Remote opens directly; no PIN gate just for opening the screen.
+          p = root / 'app/src/main/java/com/example/screentimeguard/RemoteControlActivity.java'
+          s = p.read_text()
+          old = '''        LinearLayout locked = new LinearLayout(this);\n        locked.setBackgroundColor(BG);\n        setContentView(locked);\n        authorizeSetup();'''
+          new = '''        RemoteUnlockConfig.ensureCredentials(this);\n        buildUi();\n        refresh();'''
+          if old not in s:
+              raise SystemExit('RemoteControlActivity onCreate pattern not found')
+          s = s.replace(old, new, 1)
+          s, n = re.subn(r'\n    private void authorizeSetup\(\) \{.*?\n    \}\n\n    private void buildUi\(\)', '\n\n    private void buildUi()', s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('authorizeSetup method not found')
+
+          old_enable = '''        if (verifiedGuardianPin.isEmpty()) {\n            Toast.makeText(this, "Reopen this screen and enter the guardian PIN again", Toast.LENGTH_LONG).show();\n            return;\n        }\n        RemoteUnlockConfig.setBaseUrl(this, normalized);\n        RemoteUnlockConfig.ensureCredentials(this);\n        status.setText("Registering…");\n        status.setTextColor(MUTED);\n        RemoteUnlockClient.registerAsync(this, verifiedGuardianPin, (ok, message) -> {\n            RemoteUnlockConfig.setEnabled(this, ok);\n            status.setText(message);\n            status.setTextColor(ok ? GOOD : DANGER);\n            refresh();\n        });'''
+          new_enable = '''        RemoteUnlockConfig.setBaseUrl(this, normalized);\n        RemoteUnlockConfig.ensureCredentials(this);\n        requestPinForRemoteRegistration();'''
+          if old_enable not in s:
+              raise SystemExit('enableRemote pattern not found')
+          s = s.replace(old_enable, new_enable, 1)
+
+          marker = '''    private void copyPairingLink() {'''
+          helper = '''    private void requestPinForRemoteRegistration() {\n        if (!PinStore.hasPin(this)) {\n            Toast.makeText(this, "Set a guardian PIN in Screen Time Guard first", Toast.LENGTH_LONG).show();\n            return;\n        }\n        if (PinStore.isLockedForToday(this)) {\n            Toast.makeText(this, "Guardian PIN locked for today. Try again tomorrow.", Toast.LENGTH_LONG).show();\n            return;\n        }\n\n        EditText pin = new EditText(this);\n        pin.setHint("Guardian PIN");\n        pin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);\n        pin.setSingleLine(true);\n        pin.setTextColor(TEXT);\n        pin.setHintTextColor(MUTED);\n        pin.setPadding(dp(12), dp(10), dp(12), dp(10));\n\n        LinearLayout holder = new LinearLayout(this);\n        holder.setPadding(dp(18), 0, dp(18), 0);\n        holder.addView(pin, new LinearLayout.LayoutParams(\n                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));\n\n        AlertDialog dialog = new AlertDialog.Builder(this)\n                .setTitle("Guardian authorization")\n                .setView(holder)\n                .setPositiveButton("Continue", null)\n                .setNegativeButton("Cancel", null)\n                .create();\n        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)\n                .setOnClickListener(v -> {\n                    String entered = pin.getText().toString();\n                    if (!PinStore.verify(this, entered)) {\n                        pin.setText("");\n                        if (PinStore.isLockedForToday(this)) dialog.dismiss();\n                        return;\n                    }\n                    verifiedGuardianPin = entered;\n                    dialog.dismiss();\n                    status.setText("Registering…");\n                    status.setTextColor(MUTED);\n                    RemoteUnlockClient.registerAsync(this, verifiedGuardianPin, (ok, message) -> {\n                        RemoteUnlockConfig.setEnabled(this, ok);\n                        status.setText(message);\n                        status.setTextColor(ok ? GOOD : DANGER);\n                        verifiedGuardianPin = "";\n                        refresh();\n                    });\n                }));\n        dialog.show();\n    }\n\n'''
+          if marker not in s:
+              raise SystemExit('copyPairingLink marker not found')
+          s = s.replace(marker, helper + marker, 1)
+          p.write_text(s)
+
+          # 2) Put Parent Remote inside the app's Controls section.
+          p = root / 'app/src/main/java/com/example/screentimeguard/MainActivity.java'
+          s = p.read_text()
+          anchor = '''        Button installControl = actionButton("▣   App installation control", ACCENT);\n        installControl.setOnClickListener(v ->\n                startActivity(new Intent(this, InstallControlActivity.class)));\n        root.addView(installControl, actionLp());\n'''
+          addition = anchor + '''\n        Button parentRemote = actionButton("⌁   Parent remote", ACCENT);\n        parentRemote.setOnClickListener(v ->\n                startActivity(new Intent(this, RemoteControlActivity.class)));\n        root.addView(parentRemote, actionLp());\n'''
+          if anchor not in s:
+              raise SystemExit('MainActivity insertion point not found')
+          s = s.replace(anchor, addition, 1)
+          p.write_text(s)
+
+          # 3) Remove the Parent Remote shortcut from the persistent notification.
+          p = root / 'app/src/main/java/com/example/screentimeguard/ScreenTimeService.java'
+          s = p.read_text()
+          s = s.replace('''\n        Intent remoteIntent = new Intent(this, RemoteControlActivity.class);\n        PendingIntent remotePi = PendingIntent.getActivity(this, 2, remoteIntent,\n                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);\n''', '\n')
+          s = s.replace('''\n        String remoteAction = RemoteUnlockConfig.isEnabled(this)\n                ? "Parent remote: on"\n                : "Parent remote setup";\n''', '\n')
+          s = s.replace('''\n                .addAction(new Notification.Action.Builder(\n                        android.R.drawable.ic_menu_share, remoteAction, remotePi).build())''', '')
+          p.write_text(s)
+
+          # 4) Bump app version so the update is obvious/installable.
+          p = root / 'app/build.gradle'
+          s = p.read_text()
+          s = s.replace('versionCode 11', 'versionCode 12', 1)
+          s = s.replace('versionName "11.0-parent-remote-pin"', 'versionName "12.0-parent-remote-app-access"', 1)
+          p.write_text(s)
+
+          # One-shot workflow: remove itself after applying the patch.
+          Path('.github/workflows/apply-parent-remote-ui-fix.yml').unlink()
+          PY
+
+      - name: Commit changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Move parent remote access into app" || exit 0
+          git push origin HEAD:feature/remote-parent-unlock
