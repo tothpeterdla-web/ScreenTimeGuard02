@@ -1,0 +1,106 @@
+name: Test Secure Remote Relay V2
+
+on:
+  push:
+    branches: [ "feature/remote-parent-unlock" ]
+    paths:
+      - "remote/**"
+      - ".github/workflows/test-secure-relay-v2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --no-save wrangler@latest
+
+      - name: Bootstrap temporary Cloudflare account
+        shell: bash
+        working-directory: remote
+        run: |
+          set -euo pipefail
+          cat > wrangler.temp.jsonc <<'EOF'
+          {"name":"screentimeguard-remote-v2","main":"worker.js","compatibility_date":"2026-10-01"}
+          EOF
+          npx wrangler deploy --temporary --config wrangler.temp.jsonc > "$RUNNER_TEMP/bootstrap.log" 2>&1
+
+      - name: Create temporary D1 and apply schema
+        shell: bash
+        working-directory: remote
+        run: |
+          set -euo pipefail
+          npx wrangler d1 create screentimeguard-remote-v2 --temporary --config wrangler.temp.jsonc > "$RUNNER_TEMP/d1.log" 2>&1
+          DB_ID=$(grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$RUNNER_TEMP/d1.log" | tail -1)
+          test -n "$DB_ID"
+          node - "$DB_ID" <<'NODE'
+          const fs=require('fs');
+          const id=process.argv[2];
+          fs.writeFileSync('wrangler.temp.jsonc', JSON.stringify({
+            name:'screentimeguard-remote-v2', main:'worker.js', compatibility_date:'2026-10-01',
+            d1_databases:[{binding:'DB',database_name:'screentimeguard-remote-v2',database_id:id}]
+          },null,2));
+          NODE
+          npx wrangler d1 execute screentimeguard-remote-v2 --remote --file=./schema.sql --yes --config wrangler.temp.jsonc
+
+      - name: Deploy bound relay
+        id: deploy
+        shell: bash
+        working-directory: remote
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --temporary --config wrangler.temp.jsonc > "$RUNNER_TEMP/deploy.log" 2>&1
+          URL=$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | tail -1)
+          test -n "$URL"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Test secure registration and PIN gate
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          DEVICE="test-device-$(openssl rand -hex 8)"
+          SECRET=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
+          ADMIN=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
+          SALT=$(openssl rand -base64 16 | tr -d '\n')
+          PIN=1234
+          BADPIN=9999
+          VERIFIER=$(node -e 'const c=require("crypto");const [p,s]=process.argv.slice(1);process.stdout.write(c.pbkdf2Sync(p,Buffer.from(s,"base64"),120000,32,"sha256").toString("base64"));' "$PIN" "$SALT")
+          BADVERIFIER=$(node -e 'const c=require("crypto");const [p,s]=process.argv.slice(1);process.stdout.write(c.pbkdf2Sync(p,Buffer.from(s,"base64"),120000,32,"sha256").toString("base64"));' "$BADPIN" "$SALT")
+          PROOF=$(printf 'stg-remote-pin-v1|%s|%s' "$SECRET" "$VERIFIER" | sha256sum | awk '{print $1}')
+          BADPROOF=$(printf 'stg-remote-pin-v1|%s|%s' "$SECRET" "$BADVERIFIER" | sha256sum | awk '{print $1}')
+
+          code=$(curl -sS -o "$RUNNER_TEMP/register.json" -w '%{http_code}' -X POST "$URL/v1/register" \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $SECRET" \
+            -H "X-Device-Admin: $ADMIN" \
+            --data "{\"deviceId\":\"$DEVICE\",\"guardianProof\":\"$PROOF\",\"pinSalt\":\"$SALT\",\"pinIterations\":120000}")
+          echo "register -> $code"
+          cat "$RUNNER_TEMP/register.json"; echo
+          test "$code" = 201
+
+          code=$(curl -sS -o "$RUNNER_TEMP/pininfo.json" -w '%{http_code}' "$URL/v1/pin-info?deviceId=$DEVICE" -H "Authorization: Bearer $SECRET")
+          echo "pin-info -> $code"
+          cat "$RUNNER_TEMP/pininfo.json"; echo
+          test "$code" = 200
+
+          code=$(curl -sS -o "$RUNNER_TEMP/bad.json" -w '%{http_code}' -X POST "$URL/v1/verify-pin" \
+            -H 'Content-Type: application/json' -H "Authorization: Bearer $SECRET" \
+            --data "{\"deviceId\":\"$DEVICE\",\"guardianProof\":\"$BADPROOF\"}")
+          echo "bad PIN -> $code"
+          test "$code" = 401
+
+          code=$(curl -sS -o "$RUNNER_TEMP/good.json" -w '%{http_code}' -X POST "$URL/v1/verify-pin" \
+            -H 'Content-Type: application/json' -H "Authorization: Bearer $SECRET" \
+            --data "{\"deviceId\":\"$DEVICE\",\"guardianProof\":\"$PROOF\"}")
+          echo "good PIN -> $code"
+          cat "$RUNNER_TEMP/good.json"; echo
+          test "$code" = 200
