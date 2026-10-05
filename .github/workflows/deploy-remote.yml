@@ -16,8 +16,10 @@ jobs:
       DB_NAME: screentimeguard-remote
 
     steps:
-      - name: Check out source
+      - name: Check out remote feature source
         uses: actions/checkout@v4
+        with:
+          ref: feature/remote-parent-unlock
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
