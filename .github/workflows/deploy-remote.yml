@@ -1,11 +1,6 @@
 name: Deploy Screen Time Guard Remote Relay
 
 on:
-  push:
-    branches: [ "feature/remote-parent-unlock" ]
-    paths:
-      - "remote/**"
-      - ".github/workflows/deploy-remote.yml"
   workflow_dispatch:
 
 permissions:
@@ -27,7 +22,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Check Cloudflare credentials
         shell: bash
