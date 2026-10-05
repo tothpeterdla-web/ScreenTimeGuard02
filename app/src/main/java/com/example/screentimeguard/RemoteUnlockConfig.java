@@ -13,6 +13,7 @@ public final class RemoteUnlockConfig {
     private static final String KEY_BASE_URL = "base_url";
     private static final String KEY_DEVICE_ID = "device_id";
     private static final String KEY_SECRET = "secret";
+    private static final String KEY_ADMIN_SECRET = "admin_secret";
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_LAST_COMMAND = "last_command";
 
@@ -50,27 +51,32 @@ public final class RemoteUnlockConfig {
         SharedPreferences p = prefs(context);
         String device = p.getString(KEY_DEVICE_ID, "");
         String secret = p.getString(KEY_SECRET, "");
-        if (device != null && !device.isEmpty() && secret != null && !secret.isEmpty()) return;
+        String admin = p.getString(KEY_ADMIN_SECRET, "");
+        SharedPreferences.Editor edit = p.edit();
+        boolean changed = false;
 
-        byte[] random = new byte[32];
-        new SecureRandom().nextBytes(random);
-        String newSecret = Base64.encodeToString(random,
-                Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
-        String newDevice = UUID.randomUUID().toString();
-        p.edit()
-                .putString(KEY_DEVICE_ID, newDevice)
-                .putString(KEY_SECRET, newSecret)
-                .remove(KEY_LAST_COMMAND)
-                .apply();
+        if (device == null || device.isEmpty()) {
+            edit.putString(KEY_DEVICE_ID, UUID.randomUUID().toString());
+            changed = true;
+        }
+        if (secret == null || secret.isEmpty()) {
+            edit.putString(KEY_SECRET, randomSecret());
+            changed = true;
+        }
+        if (admin == null || admin.isEmpty()) {
+            edit.putString(KEY_ADMIN_SECRET, randomSecret());
+            changed = true;
+        }
+        if (changed) {
+            edit.remove(KEY_LAST_COMMAND).apply();
+        }
     }
 
     public static void rotateCredentials(Context context) {
-        byte[] random = new byte[32];
-        new SecureRandom().nextBytes(random);
         prefs(context).edit()
                 .putString(KEY_DEVICE_ID, UUID.randomUUID().toString())
-                .putString(KEY_SECRET, Base64.encodeToString(random,
-                        Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING))
+                .putString(KEY_SECRET, randomSecret())
+                .putString(KEY_ADMIN_SECRET, randomSecret())
                 .remove(KEY_LAST_COMMAND)
                 .apply();
     }
@@ -83,6 +89,11 @@ public final class RemoteUnlockConfig {
     public static String getSecret(Context context) {
         ensureCredentials(context);
         return prefs(context).getString(KEY_SECRET, "");
+    }
+
+    public static String getAdminSecret(Context context) {
+        ensureCredentials(context);
+        return prefs(context).getString(KEY_ADMIN_SECRET, "");
     }
 
     public static boolean isEnabled(Context context) {
@@ -107,5 +118,12 @@ public final class RemoteUnlockConfig {
         if (base.isEmpty()) return "";
         return base + "/parent#device=" + Uri.encode(getDeviceId(context))
                 + "&secret=" + Uri.encode(getSecret(context));
+    }
+
+    private static String randomSecret() {
+        byte[] random = new byte[32];
+        new SecureRandom().nextBytes(random);
+        return Base64.encodeToString(random,
+                Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
     }
 }
