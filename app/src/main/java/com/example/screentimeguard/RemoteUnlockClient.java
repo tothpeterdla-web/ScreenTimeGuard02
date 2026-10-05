@@ -38,7 +38,7 @@ public final class RemoteUnlockClient {
                 String deviceId = RemoteUnlockConfig.getDeviceId(app);
                 HttpURLConnection c = connection(
                         base + "/v1/command?deviceId=" + java.net.URLEncoder.encode(deviceId, "UTF-8"),
-                        "GET", RemoteUnlockConfig.getSecret(app));
+                        "GET", RemoteUnlockConfig.getSecret(app), null);
                 int code = c.getResponseCode();
                 if (code == 204) return;
                 if (code != 200) return;
@@ -92,56 +92,57 @@ public final class RemoteUnlockClient {
         }, "remote-unlock-poll").start();
     }
 
-    public static void registerAsync(Context context, String guardianPin, Callback callback) {
+    public static void registerAsync(Context context, Callback callback) {
         Context app = context.getApplicationContext();
         new Thread(() -> {
             boolean ok = false;
             String message;
             try {
-                RemoteUnlockConfig.ensureCredentials(app);
-                String secret = RemoteUnlockConfig.getSecret(app);
-                JSONObject body = new JSONObject();
-                body.put("deviceId", RemoteUnlockConfig.getDeviceId(app));
-                body.put("guardianProof", guardianProof(secret, guardianPin));
-
-                HttpURLConnection c = connection(
-                        RemoteUnlockConfig.getBaseUrl(app) + "/v1/register",
-                        "POST", secret);
-                writeJson(c, body);
-                int code = c.getResponseCode();
-                ok = code == 200 || code == 201;
-                if (ok) {
-                    message = "Remote unlock is ready";
-                } else if (code == 409) {
-                    message = "Remote PIN changed. Revoke the old pairing, then enable it again.";
-                } else {
-                    message = "Relay rejected registration (" + code + ")";
+                if (!PinStore.hasPin(app)) {
+                    throw new IllegalStateException("guardian_pin_missing");
                 }
+                RemoteUnlockConfig.ensureCredentials(app);
+
+                RegistrationResult result = registerOnce(app);
+                if (!result.ok && result.code == 409
+                        && "legacy_admin_migration_required".equals(result.error)) {
+                    if (revokeBlocking(app)) {
+                        result = registerOnce(app);
+                        if (result.ok) {
+                            ok = true;
+                            message = "Remote pairing refreshed";
+                        } else {
+                            message = registrationMessage(result);
+                        }
+                    } else {
+                        message = "Could not refresh the old remote pairing";
+                    }
+                } else {
+                    ok = result.ok;
+                    message = registrationMessage(result);
+                }
+            } catch (IllegalStateException e) {
+                message = "Set a guardian PIN before enabling parent remote";
             } catch (Exception e) {
                 message = "Could not reach the remote unlock relay";
             }
-            boolean result = ok;
+
+            boolean resultOk = ok;
             String resultMessage = message;
-            new Handler(Looper.getMainLooper()).post(() -> callback.onResult(result, resultMessage));
+            new Handler(Looper.getMainLooper()).post(() -> callback.onResult(resultOk, resultMessage));
         }, "remote-unlock-register").start();
     }
 
     public static void revokeAsync(Context context, Callback callback) {
         Context app = context.getApplicationContext();
         new Thread(() -> {
-            boolean ok = false;
+            boolean ok;
             String message;
             try {
-                JSONObject body = new JSONObject();
-                body.put("deviceId", RemoteUnlockConfig.getDeviceId(app));
-                HttpURLConnection c = connection(
-                        RemoteUnlockConfig.getBaseUrl(app) + "/v1/revoke",
-                        "POST", RemoteUnlockConfig.getSecret(app));
-                writeJson(c, body);
-                int code = c.getResponseCode();
-                ok = code == 200;
+                ok = revokeBlocking(app);
                 message = ok ? "Remote pairing revoked" : "Local remote access disabled; relay revoke failed";
             } catch (Exception e) {
+                ok = false;
                 message = "Local remote access disabled; relay could not be reached";
             }
             boolean result = ok;
@@ -150,8 +151,54 @@ public final class RemoteUnlockClient {
         }, "remote-unlock-revoke").start();
     }
 
-    private static String guardianProof(String secret, String pin) throws Exception {
-        String input = PIN_PROOF_PREFIX + secret + "|" + pin;
+    private static RegistrationResult registerOnce(Context app) throws Exception {
+        String secret = RemoteUnlockConfig.getSecret(app);
+        String verifier = PinStore.remotePinVerifier(app);
+        String salt = PinStore.remotePinSalt(app);
+        if (verifier.isEmpty() || salt.isEmpty()) {
+            throw new IllegalStateException("guardian_pin_missing");
+        }
+
+        JSONObject body = new JSONObject();
+        body.put("deviceId", RemoteUnlockConfig.getDeviceId(app));
+        body.put("guardianProof", guardianProof(secret, verifier));
+        body.put("pinSalt", salt);
+        body.put("pinIterations", PinStore.remotePinIterations());
+
+        HttpURLConnection c = connection(
+                RemoteUnlockConfig.getBaseUrl(app) + "/v1/register",
+                "POST", secret, RemoteUnlockConfig.getAdminSecret(app));
+        writeJson(c, body);
+        int code = c.getResponseCode();
+        String error = "";
+        if (code < 200 || code >= 300) {
+            try {
+                String response = readAnyBody(c);
+                if (!response.isEmpty()) error = new JSONObject(response).optString("error", "");
+            } catch (Exception ignored) {}
+        }
+        return new RegistrationResult(code == 200 || code == 201, code, error);
+    }
+
+    private static String registrationMessage(RegistrationResult result) {
+        if (result.ok) return "Remote unlock is ready";
+        if (result.code == 401) return "Remote pairing authorization failed";
+        if (result.code == 409) return "Remote pairing needs to be refreshed";
+        return "Relay rejected registration (" + result.code + ")";
+    }
+
+    private static boolean revokeBlocking(Context app) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("deviceId", RemoteUnlockConfig.getDeviceId(app));
+        HttpURLConnection c = connection(
+                RemoteUnlockConfig.getBaseUrl(app) + "/v1/revoke",
+                "POST", RemoteUnlockConfig.getSecret(app), RemoteUnlockConfig.getAdminSecret(app));
+        writeJson(c, body);
+        return c.getResponseCode() == 200;
+    }
+
+    private static String guardianProof(String secret, String verifier) throws Exception {
+        String input = PIN_PROOF_PREFIX + secret + "|" + verifier;
         byte[] digest = MessageDigest.getInstance("SHA-256")
                 .digest(input.getBytes(StandardCharsets.UTF_8));
         StringBuilder out = new StringBuilder(digest.length * 2);
@@ -166,20 +213,24 @@ public final class RemoteUnlockClient {
             body.put("id", commandId);
             HttpURLConnection c = connection(
                     RemoteUnlockConfig.getBaseUrl(context) + "/v1/ack",
-                    "POST", RemoteUnlockConfig.getSecret(context));
+                    "POST", RemoteUnlockConfig.getSecret(context), null);
             writeJson(c, body);
             c.getResponseCode();
             c.disconnect();
         } catch (Exception ignored) {}
     }
 
-    private static HttpURLConnection connection(String url, String method, String secret) throws Exception {
+    private static HttpURLConnection connection(
+            String url, String method, String secret, String adminSecret) throws Exception {
         HttpURLConnection c = (HttpURLConnection)new URL(url).openConnection();
         c.setRequestMethod(method);
         c.setConnectTimeout(5000);
         c.setReadTimeout(5000);
         c.setUseCaches(false);
         c.setRequestProperty("Authorization", "Bearer " + secret);
+        if (adminSecret != null && !adminSecret.isEmpty()) {
+            c.setRequestProperty("X-Device-Admin", adminSecret);
+        }
         c.setRequestProperty("Accept", "application/json");
         if ("POST".equals(method)) {
             c.setDoOutput(true);
@@ -198,12 +249,34 @@ public final class RemoteUnlockClient {
 
     private static String readBody(HttpURLConnection c) throws Exception {
         InputStream in = c.getInputStream();
+        return readStream(in);
+    }
+
+    private static String readAnyBody(HttpURLConnection c) throws Exception {
+        InputStream in = c.getErrorStream();
+        if (in == null) in = c.getInputStream();
+        return in == null ? "" : readStream(in);
+    }
+
+    private static String readStream(InputStream in) throws Exception {
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(in, StandardCharsets.UTF_8))) {
             StringBuilder b = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) b.append(line);
             return b.toString();
+        }
+    }
+
+    private static final class RegistrationResult {
+        final boolean ok;
+        final int code;
+        final String error;
+
+        RegistrationResult(boolean ok, int code, String error) {
+            this.ok = ok;
+            this.code = code;
+            this.error = error;
         }
     }
 }
