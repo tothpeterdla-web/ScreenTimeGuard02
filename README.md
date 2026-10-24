@@ -76,6 +76,7 @@ Sensitive actions are protected by a guardian PIN, including:
 - disabling screen-time protection
 - changing the guardian PIN
 - releasing Device Owner mode
+- enabling or disabling AdGuard VPN lockdown
 
 ### Guardian unlock until midnight
 
@@ -111,6 +112,41 @@ The project is designed to work alongside the Android AdGuard app for adult-cont
 Screen Time Guard does not replace AdGuard. Instead, when Device Owner mode is active, it can protect AdGuard from uninstall so filtering cannot be removed casually.
 
 The current setup has been tested with AdGuard Family Protection DNS configured inside AdGuard.
+
+### Guardian-controlled VPN lockdown (v10)
+
+The AdGuard VPN always-on policy is applied by Android's Device Owner APIs.
+By default, **lockdown remains off** to preserve the existing network behavior when upgrading.
+
+In the main Screen Time Guard screen, the guardian can:
+1. Tap **Enable VPN lockdown (Guardian PIN)**.
+2. Enter the existing Guardian PIN and read the explicit connection-loss warning.
+3. Confirm to enable lockdown. The app checks Android's effective policy before
+   saving the new preference. Status is read from DevicePolicyManager, not just
+   the stored preference.
+4. To disable lockdown later, tap **Disable VPN lockdown (Guardian PIN)** and
+   enter the PIN. This recovery action works without an internet connection.
+
+If AdGuard's VPN stops, Android should block internet traffic that cannot
+use the VPN instead of allowing an unfiltered fallback. This does **not**
+disable Android's Active apps Stop button; it changes the network behavior
+after that button is used. The supported policy covers ordinary application
+traffic, but certain system applications may be exempted by Android.
+
+**Testing on the physical phone is required before relying on this protection.**
+After updating with the same signing key (do not uninstall), test that:
+- Device Owner and AdGuard protection remain intact, and the new toggle is OFF.
+- An incorrect Guardian PIN cannot modify the policy.
+- With AdGuard connected and VPN lockdown enabled, ordinary networking works.
+- Stopping AdGuard from Android's Active apps list blocks normal browser access
+  on both Wi-Fi and mobile data while the VPN is disconnected.
+- Android returns to filtered connectivity after AdGuard reconnects.
+- The guardian can disable the lockdown while offline if AdGuard fails.
+- Rebooting preserves the guardian-selected policy.
+
+A broken or incompatible AdGuard VPN can leave the phone without ordinary
+internet until it is restored or lockdown is disabled by the guardian.
+Always have the Guardian PIN available during initial testing.
 
 ### Quick controls inside restricted mode
 

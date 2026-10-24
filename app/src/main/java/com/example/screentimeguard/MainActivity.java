@@ -57,6 +57,8 @@ public class MainActivity extends Activity {
     private TextView pinValue;
     private TextView adguardValue;
     private TextView restrictedValue;
+    private TextView vpnLockdownValue;
+    private Button vpnLockdownButton;
     private TextView allowedCount;
     private ProgressBar dailyProgress;
 
@@ -215,6 +217,18 @@ public class MainActivity extends Activity {
         restrictedValue = statusTile(statusRow2, "Restricted mode");
         protection.addView(statusRow2);
         root.addView(protection, full(0, 0, 0, 14));
+
+        LinearLayout vpnCard = card();
+        vpnCard.addView(text("AdGuard VPN lockdown", 20, TEXT, true));
+        vpnCard.addView(text("Block unfiltered internet if AdGuard VPN is stopped. " +
+                "Only a guardian can change this setting.", 13, MUTED, false),
+                full(0, 3, 0, 8));
+        vpnLockdownValue = text("Checking system policy…", 14, MUTED, true);
+        vpnCard.addView(vpnLockdownValue, full(0, 0, 0, 8));
+        vpnLockdownButton = actionButton("Configure VPN lockdown", ACCENT);
+        vpnLockdownButton.setOnClickListener(v -> requirePin(this::toggleVpnLockdown));
+        vpnCard.addView(vpnLockdownButton, actionLp());
+        root.addView(vpnCard, full(0, 0, 0, 14));
 
         LinearLayout limitCard = card();
         limitCard.addView(text("Daily limit", 21, TEXT, true));
@@ -389,6 +403,15 @@ public class MainActivity extends Activity {
                 "Yes", "No");
         setState(restrictedValue, PolicyUtils.isRestrictedModeActive(this), "On", "Off");
 
+        boolean requestedLockdown = Prefs.isVpnLockdownEnabled(this);
+        boolean activeLockdown = PolicyUtils.isVpnLockdownActive(this);
+        vpnLockdownValue.setText(activeLockdown ? "ACTIVE — no unfiltered fallback"
+                : requestedLockdown ? "WARNING — lockdown not active"
+                : "OFF — internet may bypass VPN if stopped");
+        vpnLockdownValue.setTextColor(activeLockdown ? GOOD : requestedLockdown ? WARN : MUTED);
+        vpnLockdownButton.setText(requestedLockdown ? "Disable VPN lockdown (Guardian PIN)"
+                : "Enable VPN lockdown (Guardian PIN)");
+
         int extra = Prefs.getExtraAllowedPackages(this).size();
         allowedCount.setText(extra + (extra == 1 ? " extra" : " extra"));
         refreshQuickControls();
@@ -417,6 +440,38 @@ public class MainActivity extends Activity {
         } else {
             rotationButton.setText("Auto rotation   grant control permission ›");
         }
+    }
+
+    private void toggleVpnLockdown() {
+        final boolean turnOn = !Prefs.isVpnLockdownEnabled(this);
+        if (!turnOn) {
+            applyVpnLockdownChange(false);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Enable VPN lockdown?")
+                .setMessage("When AdGuard stops or fails to connect, Android will block " +
+                        "internet access rather than allow unfiltered traffic. " +
+                        "If internet stops working, reopen Screen Time Guard and " +
+                        "use the Guardian PIN to turn VPN lockdown off. " +
+                        "Only enable this while the guardian is present.")
+                .setPositiveButton("Enable lockdown", (d, w) -> applyVpnLockdownChange(true))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void applyVpnLockdownChange(boolean enabled) {
+        boolean ok = PolicyUtils.setGuardianVpnLockdown(this, enabled);
+        if (ok) {
+            Toast.makeText(this, enabled ? "VPN lockdown enabled" : "VPN lockdown disabled",
+                    Toast.LENGTH_LONG).show();
+        } else {
+            msg("Could not change VPN lockdown",
+                    "Android did not confirm the VPN policy. Check that Device Owner is " +
+                    "active and AdGuard supports Always-on VPN. No successful change " +
+                    "has been recorded.");
+        }
+        refresh();
     }
 
     private void toggleBluetooth() {
