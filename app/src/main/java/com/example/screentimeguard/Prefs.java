@@ -40,8 +40,8 @@ public final class Prefs {
         return prefs(context).getBoolean(KEY_VPN_LOCKDOWN_ENABLED, false);
     }
 
-    public static void setVpnLockdownEnabled(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_VPN_LOCKDOWN_ENABLED, enabled).commit();
+    public static boolean setVpnLockdownEnabled(Context context, boolean enabled) {
+        return prefs(context).edit().putBoolean(KEY_VPN_LOCKDOWN_ENABLED, enabled).commit();
     }
 
     public static int getLimitMinutes(Context context) {
