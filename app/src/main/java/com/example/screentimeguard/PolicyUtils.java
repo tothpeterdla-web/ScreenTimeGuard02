@@ -179,7 +179,14 @@ public final class PolicyUtils {
             // Enforce the guardian-approved setting at launch, boot and during service checks.
             // VPN lockdown is opt-in because an AdGuard failure would otherwise block networking.
             try {
-                d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, Prefs.isVpnLockdownEnabled(c));
+                boolean desiredLockdown = Prefs.isVpnLockdownEnabled(c);
+                boolean selected = ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a));
+                boolean correctLockdown = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                        || d.isAlwaysOnVpnLockdownEnabled(a) == desiredLockdown;
+                // Reapplying an unchanged VPN policy every five seconds can disrupt service.
+                if (!selected || !correctLockdown) {
+                    d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, desiredLockdown);
+                }
                 if (ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a))) {
                     d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_VPN);
                 }
@@ -223,7 +230,11 @@ public final class PolicyUtils {
             d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, enabled);
             if (!ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a))
                     || d.isAlwaysOnVpnLockdownEnabled(a) != enabled) return false;
-            Prefs.setVpnLockdownEnabled(c, enabled);
+            if (!Prefs.setVpnLockdownEnabled(c, enabled)) {
+                // Storage failed: restore the last known guardian-approved setting.
+                d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, Prefs.isVpnLockdownEnabled(c));
+                return false;
+            }
             return true;
         } catch (Exception e) {
             return false;
@@ -420,6 +431,7 @@ public final class PolicyUtils {
             try { d.clearUserRestriction(a, UserManager.DISALLOW_SAFE_BOOT); } catch (Exception ignored) {}
             try { d.clearUserRestriction(a, UserManager.DISALLOW_CONFIG_VPN); } catch (Exception ignored) {}
             try { d.setAlwaysOnVpnPackage(a, null, false); } catch (Exception ignored) {}
+            Prefs.setVpnLockdownEnabled(c, false);
             try { d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS); } catch (Exception ignored) {}
             try { d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES); } catch (Exception ignored) {}
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
