@@ -60,7 +60,7 @@ public class InstallControlActivity extends Activity {
         status = text("Checking…", 18, ACCENT, true);
         card.addView(status, full(0, 8, 0, 12));
 
-        Button allow = button("Enable app installations for 15 minutes");
+        Button allow = button("Allow app installations for 15 minutes (Guardian PIN)");
         allow.setOnClickListener(v -> requirePin(() -> {
             if (!PolicyUtils.isDeviceOwner(this)) {
                 Toast.makeText(this, "Device Owner is required", Toast.LENGTH_LONG).show();
@@ -75,13 +75,13 @@ public class InstallControlActivity extends Activity {
         }));
         card.addView(allow, buttonLp());
 
-        Button lock = button("Disable app installations now");
-        lock.setOnClickListener(v -> requirePin(() -> {
+        Button lock = button("Block app installations now");
+        lock.setOnClickListener(v -> {
             Prefs.clearInstallWindow(this);
             PolicyUtils.applyInstallProtection(this);
             Toast.makeText(this, "App installations blocked", Toast.LENGTH_SHORT).show();
             refresh();
-        }));
+        });
         card.addView(lock, buttonLp());
 
         card.addView(text("When enabled, installs from Play Store, other app stores, and APK files are allowed for 15 minutes, then automatically blocked again. Ordinary file downloads are not affected.",
