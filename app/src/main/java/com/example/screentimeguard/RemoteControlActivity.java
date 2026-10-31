@@ -20,14 +20,14 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 public class RemoteControlActivity extends Activity {
-    private static final int BG = Color.rgb(5, 9, 15);
-    private static final int CARD = Color.argb(220, 20, 34, 51);
-    private static final int BORDER = Color.argb(120, 122, 168, 207);
-    private static final int TEXT = Color.rgb(239, 246, 255);
-    private static final int MUTED = Color.rgb(155, 177, 201);
-    private static final int ACCENT = Color.rgb(36, 184, 255);
-    private static final int GOOD = Color.rgb(73, 231, 140);
-    private static final int DANGER = Color.rgb(255, 103, 120);
+    private static final int BG = UiKit.BG;
+    private static final int CARD = UiKit.CARD;
+    private static final int BORDER = UiKit.BORDER;
+    private static final int TEXT = UiKit.TEXT;
+    private static final int MUTED = UiKit.MUTED;
+    private static final int ACCENT = UiKit.ACCENT;
+    private static final int GOOD = UiKit.GOOD;
+    private static final int DANGER = UiKit.DANGER;
 
     private EditText relayUrl;
     private TextView status;
@@ -35,8 +35,7 @@ public class RemoteControlActivity extends Activity {
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(BG);
-        getWindow().setNavigationBarColor(BG);
+        UiKit.styleWindow(this);
 
         RemoteUnlockConfig.ensureCredentials(this);
         buildUi();
@@ -45,23 +44,11 @@ public class RemoteControlActivity extends Activity {
     }
 
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(22), dp(26), dp(22), dp(26));
-        root.setBackgroundColor(BG);
-
-        root.addView(text("Parent remote unlock", 28, TEXT, true));
-        root.addView(text("Pair guardian phones so they can grant temporary screen-time overrides or a 15-minute app-install window. Opening this setup on the protected phone does not require the guardian PIN. The guardian PIN is still required on the parent web page before any remote command can be sent.",
-                14, MUTED, false), full(0, 6, 0, 18));
-
-        LinearLayout card = card();
+        LinearLayout root = UiKit.page(this, "Parent remote unlock",
+                "Pair guardian devices and securely manage remote screen-time access.");
+        LinearLayout card = UiKit.card(this);
         card.addView(text("Secure relay", 20, TEXT, true));
-        relayUrl = new EditText(this);
-        relayUrl.setHint("https://your-worker.workers.dev");
-        relayUrl.setSingleLine(true);
-        relayUrl.setTextColor(TEXT);
-        relayUrl.setHintTextColor(MUTED);
-        relayUrl.setPadding(dp(12), dp(8), dp(12), dp(8));
+        relayUrl = UiKit.formField(this, "https://your-worker.workers.dev");
         card.addView(relayUrl, full(0, 8, 0, 8));
 
         status = text("Not configured", 16, MUTED, true);
@@ -89,9 +76,7 @@ public class RemoteControlActivity extends Activity {
         card.addView(text("The pairing link can be used on multiple guardian devices. The link contains the random pairing secret, but each browser must also know the guardian PIN. The PIN itself is never stored by the relay.",
                 12, MUTED, false), full(0, 10, 0, 0));
 
-        root.addView(card, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        setContentView(root);
+        root.addView(card, full(0, 0, 0, 14));
     }
 
     private void enableRemote() {
@@ -195,39 +180,7 @@ public class RemoteControlActivity extends Activity {
     }
 
     private void requirePin(Runnable action) {
-        if (!PinStore.hasPin(this)) {
-            Toast.makeText(this, "Guardian PIN required", Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (PinStore.isLockedForToday(this)) {
-            Toast.makeText(this, "Guardian PIN locked for today. Try again tomorrow.",
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        EditText pin = new EditText(this);
-        pin.setHint("Guardian PIN");
-        pin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-        pin.setSingleLine(true);
-        pin.setTextColor(TEXT);
-        pin.setHintTextColor(MUTED);
-
-        LinearLayout holder = new LinearLayout(this);
-        holder.setPadding(dp(18), 0, dp(18), 0);
-        holder.addView(pin, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        new AlertDialog.Builder(this)
-                .setTitle("Guardian authorization")
-                .setView(holder)
-                .setPositiveButton("Continue", (dialog, which) -> {
-                    if (PinStore.verify(this, pin.getText().toString())) {
-                        action.run();
-                    } else if (!PinStore.isLockedForToday(this)) {
-                        Toast.makeText(this, "Wrong PIN", Toast.LENGTH_SHORT).show();
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+        UiKit.requireGuardianPin(this, action);
     }
 
     private void refresh() {
@@ -240,59 +193,26 @@ public class RemoteControlActivity extends Activity {
     }
 
     private LinearLayout card() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(18), dp(18), dp(18), dp(18));
-        card.setBackground(cardBg());
-        return card;
+        return UiKit.card(this);
     }
 
     private TextView text(String value, int sp, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(value);
-        t.setTextSize(sp);
-        t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        return t;
+        return UiKit.text(this, value, sp, color, bold);
     }
 
     private Button button(String label, int color) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setTextColor(TEXT);
-        b.setTextSize(15);
-        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        b.setPadding(dp(15), 0, dp(15), 0);
-        GradientDrawable g = cardBg();
-        g.setStroke(dp(1), color);
-        b.setBackground(g);
-        return b;
-    }
-
-    private GradientDrawable cardBg() {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(CARD);
-        g.setCornerRadius(dp(20));
-        g.setStroke(dp(1), BORDER);
-        return g;
+        return UiKit.button(this, label, color);
     }
 
     private LinearLayout.LayoutParams buttonLp() {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(58));
-        p.setMargins(0, dp(5), 0, dp(5));
-        return p;
+        return UiKit.buttonMargins(this);
     }
 
     private LinearLayout.LayoutParams full(int left, int top, int right, int bottom) {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        p.setMargins(dp(left), dp(top), dp(right), dp(bottom));
-        return p;
+        return UiKit.margins(this, left, top, right, bottom);
     }
 
     private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
+        return UiKit.dp(this, value);
     }
 }
