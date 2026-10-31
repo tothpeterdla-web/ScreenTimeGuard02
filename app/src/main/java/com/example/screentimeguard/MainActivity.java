@@ -268,7 +268,7 @@ public class MainActivity extends Activity {
         root.addView(save, actionLp());
 
         Button apps = actionButton("▦   Choose apps allowed after limit", ACCENT);
-        apps.setOnClickListener(v -> chooseAllowedApps());
+        apps.setOnClickListener(v -> requirePin(this::chooseAllowedApps));
         root.addView(apps, actionLp());
 
         Button installControl = actionButton("▣   App installation control", ACCENT);
@@ -643,13 +643,8 @@ public class MainActivity extends Activity {
                     else working.remove(pkg);
                 })
                 .setPositiveButton("Save", (d, w) -> {
-                    // Newly allowed apps weaken restrictions. Removing exceptions tightens them.
-                    Set<String> previous = Prefs.getExtraAllowedPackages(this);
-                    if (!previous.containsAll(working)) {
-                        requirePin(() -> applyAllowedApps(working));
-                    } else {
-                        applyAllowedApps(working);
-                    }
+                    // The Guardian PIN has already been verified before this dialog opens.
+                    applyAllowedApps(working);
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
