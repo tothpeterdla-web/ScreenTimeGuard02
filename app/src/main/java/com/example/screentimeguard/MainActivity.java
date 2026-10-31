@@ -221,12 +221,12 @@ public class MainActivity extends Activity {
         LinearLayout vpnCard = card();
         vpnCard.addView(text("AdGuard VPN lockdown", 20, TEXT, true));
         vpnCard.addView(text("Block unfiltered internet if AdGuard VPN is stopped. " +
-                "Only a guardian can change this setting.", 13, MUTED, false),
+                "Turn on without a PIN; turning off requires the Guardian PIN.", 13, MUTED, false),
                 full(0, 3, 0, 8));
         vpnLockdownValue = text("Checking system policy…", 14, MUTED, true);
         vpnCard.addView(vpnLockdownValue, full(0, 0, 0, 8));
         vpnLockdownButton = actionButton("Configure VPN lockdown", ACCENT);
-        vpnLockdownButton.setOnClickListener(v -> requirePin(this::toggleVpnLockdown));
+        vpnLockdownButton.setOnClickListener(v -> toggleVpnLockdown());
         vpnCard.addView(vpnLockdownButton, actionLp());
         root.addView(vpnCard, full(0, 0, 0, 14));
 
@@ -265,11 +265,11 @@ public class MainActivity extends Activity {
 
         root.addView(sectionTitle("Controls"), full(4, 3, 0, 5));
         Button save = actionButton("✓   Save daily limit", ACCENT);
-        save.setOnClickListener(v -> requirePin(this::saveLimit));
+        save.setOnClickListener(v -> saveLimit());
         root.addView(save, actionLp());
 
         Button apps = actionButton("▦   Choose apps allowed after limit", ACCENT);
-        apps.setOnClickListener(v -> requirePin(this::chooseAllowedApps));
+        apps.setOnClickListener(v -> chooseAllowedApps());
         root.addView(apps, actionLp());
 
         Button installControl = actionButton("▣   App installation control", ACCENT);
@@ -415,7 +415,7 @@ public class MainActivity extends Activity {
                 : "OFF — internet may bypass VPN if stopped");
         vpnLockdownValue.setTextColor(activeLockdown ? GOOD : requestedLockdown ? WARN : MUTED);
         vpnLockdownButton.setText(requestedLockdown ? "Disable VPN lockdown (Guardian PIN)"
-                : "Enable VPN lockdown (Guardian PIN)");
+                : "Enable VPN lockdown (no PIN)");
 
         int extra = Prefs.getExtraAllowedPackages(this).size();
         allowedCount.setText(extra + (extra == 1 ? " extra" : " extra"));
@@ -450,7 +450,7 @@ public class MainActivity extends Activity {
     private void toggleVpnLockdown() {
         final boolean turnOn = !Prefs.isVpnLockdownEnabled(this);
         if (!turnOn) {
-            applyVpnLockdownChange(false);
+            requirePin(() -> applyVpnLockdownChange(false));
             return;
         }
         new AlertDialog.Builder(this)
@@ -591,14 +591,23 @@ public class MainActivity extends Activity {
             int m = minutes.getText().toString().isEmpty() ? 0 : Integer.parseInt(minutes.getText().toString());
             int total = h * 60 + m;
             if (h < 0 || m < 0 || m > 59 || total < 1) throw new Exception();
-            Prefs.setLimitMinutes(this, total);
-            Prefs.clearOverride(this);
-            startMonitorService();
-            Toast.makeText(this, "Daily limit saved", Toast.LENGTH_SHORT).show();
-            refresh();
+            // Increasing allowed screen time weakens protection; shortening it does not.
+            if (total > Prefs.getLimitMinutes(this)) {
+                requirePin(() -> applyDailyLimit(total));
+            } else {
+                applyDailyLimit(total);
+            }
         } catch (Exception e) {
             Toast.makeText(this, "Enter valid hours/minutes", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void applyDailyLimit(int total) {
+        Prefs.setLimitMinutes(this, total);
+        Prefs.clearOverride(this);
+        startMonitorService();
+        Toast.makeText(this, "Daily limit saved", Toast.LENGTH_SHORT).show();
+        refresh();
     }
 
     private void chooseAllowedApps() {
@@ -635,15 +644,25 @@ public class MainActivity extends Activity {
                     else working.remove(pkg);
                 })
                 .setPositiveButton("Save", (d, w) -> {
-                    Prefs.setExtraAllowedPackages(this, working);
-                    if (Prefs.isEnabled(this) && PolicyUtils.isRestrictedModeActive(this)) {
-                        PolicyUtils.prepareRestrictedLockTask(this);
+                    // Newly allowed apps weaken restrictions. Removing exceptions tightens them.
+                    Set<String> previous = Prefs.getExtraAllowedPackages(this);
+                    if (!previous.containsAll(working)) {
+                        requirePin(() -> applyAllowedApps(working));
+                    } else {
+                        applyAllowedApps(working);
                     }
-                    Toast.makeText(this, "Allowed apps updated", Toast.LENGTH_SHORT).show();
-                    refresh();
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void applyAllowedApps(Set<String> working) {
+        Prefs.setExtraAllowedPackages(this, working);
+        if (Prefs.isEnabled(this) && PolicyUtils.isRestrictedModeActive(this)) {
+            PolicyUtils.prepareRestrictedLockTask(this);
+        }
+        Toast.makeText(this, "Allowed apps updated", Toast.LENGTH_SHORT).show();
+        refresh();
     }
 
     private void setPin() {
