@@ -2,7 +2,7 @@ name: Build Signed Android APK
 
 on:
   push:
-    branches: [ "main", "feature/remote-parent-unlock", "fix/v13-parent-vpn-lockdown" ]
+    branches: [ "main", "feature/remote-parent-unlock", "fix/v13-parent-vpn-lockdown", "fix/v14-pin-only-for-weaker-security" ]
   workflow_dispatch:
 
 permissions:
