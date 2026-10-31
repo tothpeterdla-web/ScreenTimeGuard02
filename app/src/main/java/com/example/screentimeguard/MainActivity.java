@@ -34,16 +34,16 @@ import java.util.List;
 import java.util.Set;
 
 public class MainActivity extends Activity {
-    private static final int BG = Color.rgb(5, 9, 15);
-    private static final int CARD = Color.argb(220, 20, 34, 51);
-    private static final int CARD_SOFT = Color.argb(210, 24, 41, 61);
-    private static final int BORDER = Color.argb(120, 122, 168, 207);
-    private static final int TEXT = Color.rgb(239, 246, 255);
-    private static final int MUTED = Color.rgb(155, 177, 201);
-    private static final int ACCENT = Color.rgb(36, 184, 255);
-    private static final int GOOD = Color.rgb(73, 231, 140);
+    private static final int BG = UiKit.BG;
+    private static final int CARD = UiKit.CARD;
+    private static final int CARD_SOFT = UiKit.CARD_SOFT;
+    private static final int BORDER = UiKit.BORDER;
+    private static final int TEXT = UiKit.TEXT;
+    private static final int MUTED = UiKit.MUTED;
+    private static final int ACCENT = UiKit.ACCENT;
+    private static final int GOOD = UiKit.GOOD;
     private static final int WARN = Color.rgb(255, 184, 77);
-    private static final int DANGER = Color.rgb(255, 103, 120);
+    private static final int DANGER = UiKit.DANGER;
 
     private EditText hours;
     private EditText minutes;
@@ -70,8 +70,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(BG);
-        getWindow().setNavigationBarColor(BG);
+        UiKit.styleWindow(this);
         getWindow().getDecorView().setSystemUiVisibility(0);
         buildUi();
         PolicyUtils.applyAdGuardProtection(this);
@@ -690,41 +689,15 @@ public class MainActivity extends Activity {
     }
 
     private void requirePin(Runnable action) {
-        if (!PinStore.hasPin(this)) {
-            msg("No guardian PIN", "Set a guardian PIN first.");
-            return;
-        }
-        EditText p = pinField("Guardian PIN");
-        LinearLayout holder = new LinearLayout(this);
-        holder.setPadding(dp(18), 0, dp(18), 0);
-        holder.addView(p, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        new AlertDialog.Builder(this)
-                .setTitle("Guardian authorization")
-                .setView(holder)
-                .setPositiveButton("Continue", (d, w) -> {
-                    if (PinStore.verify(this, p.getText().toString())) action.run();
-                    else Toast.makeText(this, "Wrong PIN", Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+        UiKit.requireGuardianPin(this, action);
     }
 
     private LinearLayout card() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(18), dp(17), dp(18), dp(17));
-        card.setBackground(glassBg(CARD));
-        return card;
+        return UiKit.card(this);
     }
 
     private TextView text(String value, int sp, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(value);
-        t.setTextSize(sp);
-        t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        return t;
+        return UiKit.text(this, value, sp, color, bold);
     }
 
     private TextView sectionTitle(String value) {
@@ -762,26 +735,11 @@ public class MainActivity extends Activity {
     }
 
     private Button actionButton(String label, int color) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextSize(15);
-        b.setTextColor(color == DANGER ? DANGER : TEXT);
-        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        b.setAllCaps(false);
-        b.setPadding(dp(16), 0, dp(16), 0);
-        b.setBackground(glassBg(CARD_SOFT));
-        return b;
+        return UiKit.button(this, label, color);
     }
 
     private Button smallButton() {
-        Button b = new Button(this);
-        b.setTextSize(14);
-        b.setTextColor(TEXT);
-        b.setAllCaps(false);
-        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        b.setPadding(dp(14), 0, dp(14), 0);
-        b.setBackground(glassBg(CARD_SOFT));
-        return b;
+        return UiKit.button(this, "", ACCENT);
     }
 
     private EditText num(String hint) {
@@ -799,18 +757,11 @@ public class MainActivity extends Activity {
     }
 
     private EditText pinField(String hint) {
-        EditText e = num(hint);
-        e.setTextSize(18);
-        e.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-        return e;
+        return UiKit.pinField(this, hint);
     }
 
     private GradientDrawable glassBg(int fill) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(fill);
-        g.setCornerRadius(dp(22));
-        g.setStroke(dp(1), BORDER);
-        return g;
+        return UiKit.glass(this, fill, BORDER);
     }
 
     private GradientDrawable pillBg(int color) {
