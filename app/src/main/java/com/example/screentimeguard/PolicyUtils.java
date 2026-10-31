@@ -176,17 +176,22 @@ public final class PolicyUtils {
         if (isAdGuardInstalled(c)) {
             try { d.setUninstallBlocked(a, ADGUARD_PACKAGE, true); } catch (Exception ignored) {}
 
-            // Keep AdGuard selected as the system always-on VPN, but deliberately do NOT enable
-            // VPN lockdown. This avoids cutting off all internet if AdGuard fails to start.
-            // Only lock VPN settings after Android confirms the always-on assignment succeeded.
-            boolean alwaysOnApplied = false;
+            // Enforce the guardian-approved setting at launch, boot and during service checks.
+            // VPN lockdown is opt-in because an AdGuard failure would otherwise block networking.
             try {
-                d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, false);
-                alwaysOnApplied = ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a));
-            } catch (Exception ignored) {}
-
-            if (alwaysOnApplied) {
-                try { d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_VPN); } catch (Exception ignored) {}
+                boolean desiredLockdown = Prefs.isVpnLockdownEnabled(c);
+                boolean selected = ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a));
+                boolean correctLockdown = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                        || d.isAlwaysOnVpnLockdownEnabled(a) == desiredLockdown;
+                // Reapplying an unchanged VPN policy every five seconds can disrupt service.
+                if (!selected || !correctLockdown) {
+                    d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, desiredLockdown);
+                }
+                if (ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a))) {
+                    d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_VPN);
+                }
+            } catch (Exception ignored) {
+                // Do not claim success: the UI reads the actual policy state.
             }
         }
         try { d.addUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET); } catch (Exception ignored) {}
@@ -197,6 +202,43 @@ public final class PolicyUtils {
         try { d.addUserRestriction(a, UserManager.DISALLOW_SAFE_BOOT); } catch (Exception ignored) {}
 
         applyInstallProtection(c);
+    }
+
+    // Read the effective device policy, not just the saved guardian preference.
+    public static boolean isVpnLockdownActive(Context c) {
+        if (!isDeviceOwner(c) || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false;
+        try {
+            DevicePolicyManager d = dpm(c);
+            ComponentName a = admin(c);
+            return ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a))
+                    && d.isAlwaysOnVpnLockdownEnabled(a);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // Called ONLY after MainActivity has checked the Guardian PIN.
+    // Save the preference only after Android confirms the requested policy.
+    public static boolean setGuardianVpnLockdown(Context c, boolean enabled) {
+        if (!isDeviceOwner(c) || !isAdGuardInstalled(c)
+                || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false;
+        try {
+            DevicePolicyManager d = dpm(c);
+            ComponentName a = admin(c);
+            // Protect the system VPN configuration before toggling lockdown.
+            d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_VPN);
+            d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, enabled);
+            if (!ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a))
+                    || d.isAlwaysOnVpnLockdownEnabled(a) != enabled) return false;
+            if (!Prefs.setVpnLockdownEnabled(c, enabled)) {
+                // Storage failed: restore the last known guardian-approved setting.
+                d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, Prefs.isVpnLockdownEnabled(c));
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public static void applyPersistentPolicies(Context c) {
@@ -389,6 +431,7 @@ public final class PolicyUtils {
             try { d.clearUserRestriction(a, UserManager.DISALLOW_SAFE_BOOT); } catch (Exception ignored) {}
             try { d.clearUserRestriction(a, UserManager.DISALLOW_CONFIG_VPN); } catch (Exception ignored) {}
             try { d.setAlwaysOnVpnPackage(a, null, false); } catch (Exception ignored) {}
+            Prefs.setVpnLockdownEnabled(c, false);
             try { d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS); } catch (Exception ignored) {}
             try { d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES); } catch (Exception ignored) {}
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
