@@ -10,6 +10,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -82,7 +83,7 @@ public class RemoteControlActivity extends Activity {
         card.addView(share, buttonLp());
 
         Button disable = button("Disable & revoke remote pairing", DANGER);
-        disable.setOnClickListener(v -> disableRemote());
+        disable.setOnClickListener(v -> requirePin(this::disableRemote));
         card.addView(disable, buttonLp());
 
         card.addView(text("The pairing link can be used on multiple guardian devices. The link contains the random pairing secret, but each browser must also know the guardian PIN. The PIN itself is never stored by the relay.",
@@ -104,6 +105,16 @@ public class RemoteControlActivity extends Activity {
             return;
         }
 
+        // Changing an active guardian endpoint can break the existing parent's control.
+        if (RemoteUnlockConfig.isEnabled(this)
+                && !normalized.equals(RemoteUnlockConfig.getBaseUrl(this))) {
+            requirePin(() -> applyRemoteConfig(normalized));
+        } else {
+            applyRemoteConfig(normalized);
+        }
+    }
+
+    private void applyRemoteConfig(String normalized) {
         RemoteUnlockConfig.setBaseUrl(this, normalized);
         RemoteUnlockConfig.ensureCredentials(this);
         status.setText("Registering…");
@@ -178,6 +189,42 @@ public class RemoteControlActivity extends Activity {
                         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
                         refresh();
                     });
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void requirePin(Runnable action) {
+        if (!PinStore.hasPin(this)) {
+            Toast.makeText(this, "Guardian PIN required", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (PinStore.isLockedForToday(this)) {
+            Toast.makeText(this, "Guardian PIN locked for today. Try again tomorrow.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        EditText pin = new EditText(this);
+        pin.setHint("Guardian PIN");
+        pin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pin.setSingleLine(true);
+        pin.setTextColor(TEXT);
+        pin.setHintTextColor(MUTED);
+
+        LinearLayout holder = new LinearLayout(this);
+        holder.setPadding(dp(18), 0, dp(18), 0);
+        holder.addView(pin, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        new AlertDialog.Builder(this)
+                .setTitle("Guardian authorization")
+                .setView(holder)
+                .setPositiveButton("Continue", (dialog, which) -> {
+                    if (PinStore.verify(this, pin.getText().toString())) {
+                        action.run();
+                    } else if (!PinStore.isLockedForToday(this)) {
+                        Toast.makeText(this, "Wrong PIN", Toast.LENGTH_SHORT).show();
+                    }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
