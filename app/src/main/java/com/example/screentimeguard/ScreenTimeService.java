@@ -5,12 +5,21 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
+import android.net.Uri;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ScreenTimeService extends Service {
     private static final String CHANNEL = "screen_time_guard";
@@ -18,6 +27,26 @@ public class ScreenTimeService extends Service {
     private static final long POLL_MS = 5_000L;
     private static final long WIDGET_UPDATE_MS = 30_000L;
     private long lastWidgetUpdate = 0L;
+    private long lastQuarantineAuditMs = -1L;
+    private final ExecutorService quarantineWorker = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean quarantineJobRunning = new AtomicBoolean(false);
+    private final BroadcastReceiver packageChangeReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (Intent.ACTION_PACKAGE_ADDED.equals(intent.getAction())
+                    || Intent.ACTION_PACKAGE_REPLACED.equals(intent.getAction())) {
+                enqueueQuarantineAudit();
+            }
+        }
+    };
+
+    private void enqueueQuarantineAudit() {
+        if (!Prefs.isUpdateOnlyModeEnabled(this)) return;
+        if (!quarantineJobRunning.compareAndSet(false, true)) return;
+        quarantineWorker.execute(() -> {
+            try { PolicyUtils.quarantineUnapprovedApps(getApplicationContext()); }
+            finally { quarantineJobRunning.set(false); }
+        });
+    }
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private final Runnable poll = new Runnable() {
@@ -45,6 +74,16 @@ public class ScreenTimeService extends Service {
         } else {
             startForeground(ID, n);
         }
+        IntentFilter appChanges = new IntentFilter();
+        appChanges.addAction(Intent.ACTION_PACKAGE_ADDED);
+        appChanges.addAction(Intent.ACTION_PACKAGE_REPLACED);
+        appChanges.addDataScheme("package");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(packageChangeReceiver, appChanges, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(packageChangeReceiver, appChanges);
+        }
+        enqueueQuarantineAudit();
         handler.post(poll);
     }
 
@@ -54,6 +93,11 @@ public class ScreenTimeService extends Service {
 
     private void tick() {
         PolicyUtils.applyAdGuardProtection(this);
+        long currentElapsed = SystemClock.elapsedRealtime();
+        if (lastQuarantineAuditMs < 0L || currentElapsed - lastQuarantineAuditMs >= 10_000L) {
+            lastQuarantineAuditMs = currentElapsed;
+            enqueueQuarantineAudit();
+        }
 
         boolean owner = PolicyUtils.isDeviceOwner(this);
         boolean enabled = Prefs.isEnabled(this);
@@ -155,6 +199,8 @@ public class ScreenTimeService extends Service {
 
     @Override public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        try { unregisterReceiver(packageChangeReceiver); } catch (Exception ignored) {}
+        quarantineWorker.shutdownNow();
         super.onDestroy();
     }
 
