@@ -36,9 +36,11 @@ public final class PolicyUtils {
     public static final String ADGUARD_PACKAGE = "com.adguard.android";
     public static final String MESSENGER_PACKAGE = "com.facebook.orca";
 
-    // A disconnected VPN should be retried promptly, but not reconfigured on every tick.
-    private static final long VPN_RECOVERY_RETRY_MS = 20_000L;
-    private static long lastVpnRecoveryAttemptElapsedMs = -1L;
+    // Android manages the always-on VPN lifecycle. Wait for a normal reconnect;
+    // perform at most one restart request per outage to avoid policy churn.
+    private static final long VPN_RECOVERY_GRACE_MS = 15_000L;
+    private static long vpnMissingSinceElapsedMs = -1L;
+    private static boolean vpnRecoveryAttemptedForOutage = false;
 
     private static final Set<String> ALWAYS_BLOCKED = new HashSet<>(Arrays.asList(
             "com.android.chrome", "com.sec.android.app.sbrowser", "org.mozilla.firefox",
@@ -195,7 +197,7 @@ public final class PolicyUtils {
                 if (!selected || !correctLockdown) {
                     // Initial setup or policy repair also asks Android to start the VPN.
                     d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, desiredLockdown);
-                    lastVpnRecoveryAttemptElapsedMs = SystemClock.elapsedRealtime();
+                    resetVpnRecoveryObservation();
                 } else {
                     // Re-apply only when no VPN transport is visible. Android's always-on
                     // startup path is invoked even when the selected package is unchanged.
@@ -220,32 +222,64 @@ public final class PolicyUtils {
         applyInstallProtection(c);
     }
 
-    // Runs during the existing five-second ScreenTimeService poll; this is NOT a
-    // second background service. No PIN, settings or lockdown state is changed.
+    // Never remove the always-on package, turn off lockdown, or allow an
+    // unfiltered fallback. Reasserting the DPM policy every 20s can destabilize
+    // VPN setup; Android normally maintains the VPN lifecycle itself.
     private static void maybeRecoverStoppedVpn(Context c, DevicePolicyManager d,
                                                ComponentName a, boolean lockdownEnabled) {
         Boolean connected = hasActiveVpnTransport(c);
-        if (connected == null) return; // Unknown network state: do not churn the VPN.
+        if (connected == null) return;
         if (connected) {
-            lastVpnRecoveryAttemptElapsedMs = -1L;
+            resetVpnRecoveryObservation();
             return;
         }
         long now = SystemClock.elapsedRealtime();
-        if (lastVpnRecoveryAttemptElapsedMs >= 0
-                && now - lastVpnRecoveryAttemptElapsedMs < VPN_RECOVERY_RETRY_MS) return;
-        lastVpnRecoveryAttemptElapsedMs = now;
+        if (vpnMissingSinceElapsedMs < 0L) {
+            vpnMissingSinceElapsedMs = now;
+            return;
+        }
+        if (vpnRecoveryAttemptedForOutage
+                || now - vpnMissingSinceElapsedMs < VPN_RECOVERY_GRACE_MS) return;
+        vpnRecoveryAttemptedForOutage = true;
         try {
-            // Crucial: use exactly the existing guardian-approved lockdown setting.
-            // Never clear the always-on package or temporarily allow unfiltered traffic.
             d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, lockdownEnabled);
-            Log.i("ScreenTimeGuard", "Requested restart of disconnected always-on AdGuard VPN");
+            Log.i("ScreenTimeGuard", "Requested one-time Android VPN recovery");
         } catch (Exception e) {
-            Log.w("ScreenTimeGuard", "Could not request always-on VPN restart", e);
+            Log.w("ScreenTimeGuard", "VPN recovery request failed", e);
         }
     }
 
-    // A VPN network is visible only while a VPN tunnel is actually established.
-    // If Android cannot disclose the state, leave the policy alone instead.
+    private static void resetVpnRecoveryObservation() {
+        vpnMissingSinceElapsedMs = -1L;
+        vpnRecoveryAttemptedForOutage = false;
+    }
+
+    // This detects a VPN tunnel, NOT confirmed internet, DNS or filtering.
+    public static Boolean isVpnTransportConnected(Context c) {
+        return hasActiveVpnTransport(c);
+    }
+
+    // User-initiated repair keeps the guardian-approved lockdown unchanged.
+    public static boolean retryAdGuardVpnConnection(Context c) {
+        if (!isDeviceOwner(c) || !isAdGuardInstalled(c)) return false;
+        try {
+            DevicePolicyManager d = dpm(c);
+            ComponentName a = admin(c);
+            boolean lockdown = Prefs.isVpnLockdownEnabled(c);
+            if (!ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a))) return false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                    && d.isAlwaysOnVpnLockdownEnabled(a) != lockdown) return false;
+            d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, lockdown);
+            return ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a))
+                    && (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                        || d.isAlwaysOnVpnLockdownEnabled(a) == lockdown);
+        } catch (Exception e) {
+            Log.w("ScreenTimeGuard", "Manual VPN repair failed", e);
+            return false;
+        }
+    }
+
+    // Some Android versions may not expose VPN status to this app.
     private static Boolean hasActiveVpnTransport(Context c) {
         try {
             ConnectivityManager cm =
