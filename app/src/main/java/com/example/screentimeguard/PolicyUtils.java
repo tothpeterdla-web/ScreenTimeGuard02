@@ -19,6 +19,7 @@ import android.os.UserManager;
 import android.telecom.TelecomManager;
 import android.view.accessibility.AccessibilityManager;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -113,6 +114,31 @@ public final class PolicyUtils {
             return dpm(c).isUninstallBlocked(admin(c), ADGUARD_PACKAGE);
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    // On Android 11+ this protects AdGuard from both Settings > Force stop
+    // and the Android 13 Active apps foreground-service Task Manager Stop.
+    // It does not enable VPN lockdown or prevent Android's own emergency stops.
+    public static boolean isAdGuardStopProtected(Context c) {
+        if (!isDeviceOwner(c) || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false;
+        try {
+            return dpm(c).getUserControlDisabledPackages(admin(c)).contains(ADGUARD_PACKAGE);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static void protectAdGuardFromUserStop(DevicePolicyManager d, ComponentName a) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
+        try {
+            // Never discard other packages already protected by the admin.
+            LinkedHashSet<String> blocked = new LinkedHashSet<>(d.getUserControlDisabledPackages(a));
+            if (blocked.add(ADGUARD_PACKAGE)) {
+                d.setUserControlDisabledPackages(a, new ArrayList<>(blocked));
+            }
+        } catch (Exception ignored) {
+            // VPN always-on and uninstall protection remain active independently.
         }
     }
 
@@ -276,6 +302,10 @@ public final class PolicyUtils {
         try { d.setUninstallBlocked(a, c.getPackageName(), true); } catch (Exception ignored) {}
         if (isAdGuardInstalled(c)) {
             try { d.setUninstallBlocked(a, ADGUARD_PACKAGE, true); } catch (Exception ignored) {}
+
+            // Block both Active apps > Stop and Settings > Force stop.
+            // This is separate from the VPN lockdown setting.
+            protectAdGuardFromUserStop(d, a);
 
             // Original v12 behavior: reapply the always-on AdGuard policy every
             // five-second service tick. Older v12 had lockdown=false here.
