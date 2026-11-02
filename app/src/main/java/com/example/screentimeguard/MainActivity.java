@@ -58,6 +58,7 @@ public class MainActivity extends Activity {
     private TextView adguardValue;
     private TextView restrictedValue;
     private TextView vpnLockdownValue;
+    private TextView vpnConnectionValue;
     private Button vpnLockdownButton;
     private TextView allowedCount;
     private ProgressBar dailyProgress;
@@ -227,6 +228,11 @@ public class MainActivity extends Activity {
         vpnLockdownButton = actionButton("Configure VPN lockdown", ACCENT);
         vpnLockdownButton.setOnClickListener(v -> toggleVpnLockdown());
         vpnCard.addView(vpnLockdownButton, actionLp());
+        vpnConnectionValue = text("Checking VPN connection…", 13, MUTED, false);
+        vpnCard.addView(vpnConnectionValue, full(0, 9, 0, 6));
+        Button repairVpn = actionButton("↻   Retry VPN and open AdGuard", MUTED);
+        repairVpn.setOnClickListener(v -> repairAdGuardVpn());
+        vpnCard.addView(repairVpn, actionLp());
         root.addView(vpnCard, full(0, 0, 0, 14));
 
         LinearLayout limitCard = card();
@@ -415,6 +421,13 @@ public class MainActivity extends Activity {
         vpnLockdownValue.setTextColor(activeLockdown ? GOOD : requestedLockdown ? WARN : MUTED);
         vpnLockdownButton.setText(requestedLockdown ? "Disable VPN lockdown (Guardian PIN)"
                 : "Enable VPN lockdown (no PIN)");
+        Boolean vpnConnected = PolicyUtils.isVpnTransportConnected(this);
+        vpnConnectionValue.setText(vpnConnected == null
+                ? "VPN connection: cannot verify on this device"
+                : vpnConnected
+                ? "VPN tunnel detected (Internet/DNS not independently verified)"
+                : "VPN disconnected: reopen AdGuard to restore protection");
+        vpnConnectionValue.setTextColor(Boolean.FALSE.equals(vpnConnected) ? WARN : MUTED);
 
         int extra = Prefs.getExtraAllowedPackages(this).size();
         allowedCount.setText(extra + (extra == 1 ? " extra" : " extra"));
@@ -476,6 +489,29 @@ public class MainActivity extends Activity {
                     "has been recorded.");
         }
         refresh();
+    }
+
+    private void repairAdGuardVpn() {
+        // Reassert the existing policy only. Never disable lockdown or filtering.
+        boolean requested = PolicyUtils.retryAdGuardVpnConnection(this);
+        if (!requested) {
+            msg("VPN recovery request failed",
+                    "The saved VPN policy could not be verified. No security setting was changed.");
+            refresh();
+            return;
+        }
+        try {
+            Intent open = getPackageManager().getLaunchIntentForPackage(PolicyUtils.ADGUARD_PACKAGE);
+            if (open != null) {
+                startActivity(open);
+            } else {
+                msg("AdGuard needs attention",
+                        "Android accepted the VPN restart request, but AdGuard could not be opened.");
+            }
+        } catch (Exception e) {
+            msg("Open AdGuard",
+                    "Android accepted the VPN restart request, but AdGuard could not be opened.");
+        }
     }
 
     private void toggleBluetooth() {
