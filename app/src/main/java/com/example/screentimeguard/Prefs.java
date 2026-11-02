@@ -19,6 +19,9 @@ public final class Prefs {
     private static final String KEY_OVERRIDE_UNTIL = "override_until";
     private static final String KEY_EXTRA_ALLOWED_PACKAGES = "extra_allowed_packages";
 
+    private static final String KEY_UPDATE_MODE = "automatic_updates_quarantine_mode";
+    private static final String KEY_APPROVED_APPS = "approved_install_packages";
+    private static final String KEY_QUARANTINED_APPS = "quarantined_install_packages";
     private static final String KEY_INSTALL_ALLOWED_UNTIL = "install_allowed_until";
     // Legacy key from the temporary manual-toggle implementation.
     private static final String KEY_INSTALL_ALLOWED = "install_allowed";
@@ -90,6 +93,54 @@ public final class Prefs {
         ZonedDateTime now = ZonedDateTime.now();
         ZonedDateTime nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(now.getZone());
         prefs(context).edit().putLong(KEY_OVERRIDE_UNTIL, nextMidnight.toInstant().toEpochMilli()).apply();
+    }
+
+    // This mode is enabled only after guardian PIN authentication in the UI.
+    // The initial approved set captures apps that were already installed.
+    public static boolean isUpdateOnlyModeEnabled(Context c) {
+        return prefs(c).getBoolean(KEY_UPDATE_MODE, false);
+    }
+
+    public static synchronized boolean enableUpdateOnlyMode(Context c, Set<String> installedPackages) {
+        Set<String> approved = new HashSet<>(installedPackages);
+        approved.removeAll(getQuarantinedPackages(c));
+        approved.add(c.getPackageName());
+        return prefs(c).edit()
+                .putStringSet(KEY_APPROVED_APPS, approved)
+                .putBoolean(KEY_UPDATE_MODE, true)
+                .commit();
+    }
+
+    public static synchronized boolean disableUpdateOnlyMode(Context c) {
+        return prefs(c).edit().putBoolean(KEY_UPDATE_MODE, false).commit();
+    }
+
+    public static synchronized Set<String> getApprovedPackages(Context c) {
+        return new HashSet<>(prefs(c).getStringSet(KEY_APPROVED_APPS, Collections.emptySet()));
+    }
+
+    public static synchronized Set<String> getQuarantinedPackages(Context c) {
+        return new HashSet<>(prefs(c).getStringSet(KEY_QUARANTINED_APPS, Collections.emptySet()));
+    }
+
+    public static synchronized boolean recordQuarantinedPackage(Context c, String pkg) {
+        if (getApprovedPackages(c).contains(pkg)) return false;
+        Set<String> pending = getQuarantinedPackages(c);
+        if (pending.contains(pkg)) return true;
+        pending.add(pkg);
+        return prefs(c).edit().putStringSet(KEY_QUARANTINED_APPS, pending).commit();
+    }
+
+    public static synchronized boolean approveQuarantinedPackage(Context c, String pkg) {
+        Set<String> pending = getQuarantinedPackages(c);
+        if (!pending.contains(pkg)) return false;
+        Set<String> approved = getApprovedPackages(c);
+        approved.add(pkg);
+        pending.remove(pkg);
+        return prefs(c).edit()
+                .putStringSet(KEY_APPROVED_APPS, approved)
+                .putStringSet(KEY_QUARANTINED_APPS, pending)
+                .commit();
     }
 
     public static long getInstallAllowedUntil(Context context) {
