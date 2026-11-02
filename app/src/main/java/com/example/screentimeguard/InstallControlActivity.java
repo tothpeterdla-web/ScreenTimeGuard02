@@ -2,6 +2,8 @@ package com.example.screentimeguard;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -12,8 +14,13 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 public class InstallControlActivity extends Activity {
     private static final int BG = Color.rgb(5, 9, 15);
@@ -48,7 +55,7 @@ public class InstallControlActivity extends Activity {
         root.setBackgroundColor(BG);
 
         root.addView(text("App installations", 28, TEXT, true));
-        root.addView(text("App installs from Play Store, other app stores, APK files, browsers, and file managers are blocked unless a guardian temporarily enables installations.",
+        root.addView(text("Use automatic updates to keep existing apps current without PIN prompts. New installations are hidden until a guardian approves them.",
                 14, MUTED, false), full(0, 6, 0, 18));
 
         LinearLayout card = new LinearLayout(this);
@@ -89,7 +96,52 @@ public class InstallControlActivity extends Activity {
 
         root.addView(card, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        setContentView(root);
+
+        LinearLayout updatesCard = new LinearLayout(this);
+        updatesCard.setOrientation(LinearLayout.VERTICAL);
+        updatesCard.setPadding(dp(18), dp(18), dp(18), dp(18));
+        updatesCard.setBackground(cardBg());
+        LinearLayout.LayoutParams updateLp = full(0, 16, 0, 0);
+        root.addView(updatesCard, updateLp);
+
+        updatesCard.addView(text("Automatic updates + app quarantine", 20, TEXT, true));
+        updatesCard.addView(text("Existing apps can update without a PIN. Android may still download and install a new app, but ScreenTimeGuard hides it until guardian approval. There can be a short detection delay.",
+                13, MUTED, false), full(0, 7, 0, 10));
+
+        Button enableUpdates = button("Enable automatic updates (Guardian PIN)");
+        enableUpdates.setOnClickListener(v -> requirePin(() ->
+                new AlertDialog.Builder(this)
+                        .setTitle("Enable automatic updates?")
+                        .setMessage("Android will permit app installations. ScreenTimeGuard will hide new, unapproved apps as soon as it detects them. There may be a short interval before quarantine. Existing apps will update without a PIN.")
+                        .setPositiveButton("Enable", (dialog, which) -> {
+                            boolean success = PolicyUtils.enableAutomaticUpdates(this);
+                            Toast.makeText(this, success
+                                            ? "Automatic updates enabled; new apps quarantined"
+                                            : "Could not safely enable automatic updates",
+                                    Toast.LENGTH_LONG).show();
+                            refresh();
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show()));
+        updatesCard.addView(enableUpdates, buttonLp());
+
+        Button review = button("Review quarantined new apps (Guardian PIN)");
+        review.setOnClickListener(v -> requirePin(this::showQuarantinedApps));
+        updatesCard.addView(review, buttonLp());
+
+        Button strict = button("Restore strict installation block (Guardian PIN)");
+        strict.setOnClickListener(v -> requirePin(() -> {
+            boolean ok = PolicyUtils.disableAutomaticUpdates(this);
+            Toast.makeText(this, ok ? "Strict installation block restored"
+                    : "Could not restore installation policy", Toast.LENGTH_LONG).show();
+            refresh();
+        }));
+        updatesCard.addView(strict, buttonLp());
+
+        ScrollView scroller = new ScrollView(this);
+        scroller.setFillViewport(true);
+        scroller.addView(root);
+        setContentView(scroller);
     }
 
     private void refresh() {
@@ -99,7 +151,11 @@ public class InstallControlActivity extends Activity {
             return;
         }
 
-        if (Prefs.isInstallWindowActive(this)) {
+        if (Prefs.isUpdateOnlyModeEnabled(this)) {
+            int pending = Prefs.getQuarantinedPackages(this).size();
+            status.setText("Automatic updates ON · " + pending + " new app(s) quarantined");
+            status.setTextColor(GOOD);
+        } else if (Prefs.isInstallWindowActive(this)) {
             long left = Math.max(0L, Prefs.getInstallAllowedUntil(this) - System.currentTimeMillis());
             long mins = Math.max(1L, (left + 59_999L) / 60_000L);
             status.setText("App installations enabled · about " + mins + " min left");
@@ -108,6 +164,45 @@ public class InstallControlActivity extends Activity {
             status.setText(PolicyUtils.isAppInstallBlocked(this) ? "All app installations blocked" : "Applying block…");
             status.setTextColor(ACCENT);
         }
+    }
+
+    private void showQuarantinedApps() {
+        List<String> pkgs = new ArrayList<>(Prefs.getQuarantinedPackages(this));
+        Collections.sort(pkgs);
+        if (pkgs.isEmpty()) {
+            new AlertDialog.Builder(this).setTitle("New apps")
+                    .setMessage("No newly installed apps are awaiting approval.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
+        String[] labels = new String[pkgs.size()];
+        PackageManager pm = getPackageManager();
+        for (int i = 0; i < pkgs.size(); i++) {
+            String pkg = pkgs.get(i);
+            String appName = pkg;
+            try {
+                ApplicationInfo info = pm.getApplicationInfo(pkg, PackageManager.MATCH_ALL);
+                CharSequence name = pm.getApplicationLabel(info);
+                if (name != null && name.length() > 0) appName = name.toString();
+            } catch (Exception ignored) {}
+            labels[i] = appName + " (" + pkg + ")";
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Approve a quarantined app?")
+                .setItems(labels, (dialog, which) -> {
+                    String pkg = pkgs.get(which);
+                    new AlertDialog.Builder(this)
+                            .setTitle("Allow this new app?")
+                            .setMessage(pkg + " will be unhidden and may run normally. This change was authorized with the guardian PIN.")
+                            .setPositiveButton("Approve", (d, w) -> {
+                                boolean success = PolicyUtils.approveInstalledApp(this, pkg);
+                                Toast.makeText(this, success ? "App approved"
+                                        : "Could not approve app", Toast.LENGTH_LONG).show();
+                                refresh();
+                            })
+                            .setNegativeButton("Cancel", null).show();
+                })
+                .setNegativeButton("Cancel", null).show();
     }
 
     private void requirePin(Runnable action) {
