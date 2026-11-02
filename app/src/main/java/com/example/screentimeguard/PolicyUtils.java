@@ -146,11 +146,23 @@ public final class PolicyUtils {
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
         try {
-            if (Prefs.isInstallWindowActive(c)) {
+            boolean guardianWindow = Prefs.isInstallWindowActive(c);
+            boolean automaticUpdates = Prefs.isUpdateOnlyModeEnabled(c);
+            if (guardianWindow) {
+                // PIN-authorized installation window retains its original behavior.
                 d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS);
                 d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY);
+                }
+            } else if (automaticUpdates) {
+                // Play Store may now update installed apps without the guardian PIN.
+                // All newly installed packages must be quarantined by our Device Owner.
+                // Unknown-source APK installations remain restricted by Android.
+                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS);
+                d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY);
                 }
             } else {
                 Prefs.clearInstallWindow(c);
@@ -161,6 +173,95 @@ public final class PolicyUtils {
                 }
             }
         } catch (Exception ignored) {}
+    }
+
+    public static boolean enableAutomaticUpdates(Context c) {
+        if (!isDeviceOwner(c)) return false;
+        Set<String> installed = new HashSet<>();
+        try {
+            for (ApplicationInfo app : c.getPackageManager()
+                    .getInstalledApplications(PackageManager.MATCH_ALL)) {
+                if (app != null && app.packageName != null) installed.add(app.packageName);
+            }
+        } catch (Exception e) {
+            return false; // Never open installation policy without a full baseline.
+        }
+        if (installed.isEmpty() || !Prefs.enableUpdateOnlyMode(c, installed)) return false;
+        applyInstallProtection(c);
+        return Prefs.isUpdateOnlyModeEnabled(c);
+    }
+
+    public static boolean disableAutomaticUpdates(Context c) {
+        if (!isDeviceOwner(c) || !Prefs.disableUpdateOnlyMode(c)) return false;
+        // Restoring the original strict PIN-controlled install policy never
+        // automatically unhides quarantined apps.
+        applyInstallProtection(c);
+        return true;
+    }
+
+    // This runs on a background executor from the always-on monitor. New apps
+    // are hidden with Device Owner policy, while updates of baseline packages
+    // are left untouched. A new app may briefly exist before we detect it:
+    // this is a quarantine, not a pre-install rejection.
+    public static void quarantineUnapprovedApps(Context c) {
+        if (!isDeviceOwner(c) || !Prefs.isUpdateOnlyModeEnabled(c)) return;
+        DevicePolicyManager d = dpm(c);
+        ComponentName a = admin(c);
+        Set<String> approved = Prefs.getApprovedPackages(c);
+        Set<String> pending = Prefs.getQuarantinedPackages(c);
+        List<ApplicationInfo> apps;
+        try {
+            apps = c.getPackageManager().getInstalledApplications(PackageManager.MATCH_ALL);
+        } catch (Exception e) {
+            return;
+        }
+        for (ApplicationInfo app : apps) {
+            if (!Prefs.isUpdateOnlyModeEnabled(c)) return;
+            if (app == null || app.packageName == null) continue;
+            String pkg = app.packageName;
+            if (pkg.equals(c.getPackageName()) || system(app) || approved.contains(pkg)) continue;
+            try {
+                if (!d.isApplicationHidden(a, pkg)) d.setApplicationHidden(a, pkg, true);
+                if (d.isApplicationHidden(a, pkg)) {
+                    Prefs.recordQuarantinedPackage(c, pkg);
+                } else {
+                    // When Android cannot hide a package, fail closed to prevent
+                    // further installs rather than claim it is quarantined.
+                    Prefs.disableUpdateOnlyMode(c);
+                    applyInstallProtection(c);
+                    return;
+                }
+            } catch (Exception ignored) {
+                Prefs.disableUpdateOnlyMode(c);
+                applyInstallProtection(c);
+                return;
+            }
+        }
+
+        // Keep persisted quarantines hidden after package updates or reboot.
+        for (String pkg : pending) {
+            if (!Prefs.isUpdateOnlyModeEnabled(c)) return;
+            if (approved.contains(pkg) || pkg.equals(c.getPackageName())) continue;
+            try {
+                if (!d.isApplicationHidden(a, pkg)) d.setApplicationHidden(a, pkg, true);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    // Called only after guardian PIN authentication in InstallControlActivity.
+    public static boolean approveInstalledApp(Context c, String pkg) {
+        if (!isDeviceOwner(c) || pkg == null
+                || !Prefs.getQuarantinedPackages(c).contains(pkg)) return false;
+        DevicePolicyManager d = dpm(c);
+        ComponentName a = admin(c);
+        try {
+            if (!d.setApplicationHidden(a, pkg, false)
+                    || d.isApplicationHidden(a, pkg)) return false;
+            if (Prefs.approveQuarantinedPackage(c, pkg)) return true;
+            // Failed to persist approval: restore quarantine.
+            d.setApplicationHidden(a, pkg, true);
+        } catch (Exception ignored) {}
+        return false;
     }
 
     // Adult-content protection, app-install protection, anti-reset and anti-safe-mode policies
