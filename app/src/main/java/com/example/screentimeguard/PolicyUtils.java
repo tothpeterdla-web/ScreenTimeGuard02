@@ -11,6 +11,9 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -30,6 +33,42 @@ public final class PolicyUtils {
 
     public static final String ADGUARD_PACKAGE = "com.adguard.android";
     public static final String MESSENGER_PACKAGE = "com.facebook.orca";
+
+    // Avoid repeatedly asking Android System UI to reconfigure policies
+    // that are already active. Only disconnected VPNs need a restart request.
+    private static boolean isVpnTunnelUp(Context c) {
+        try {
+            ConnectivityManager cm =
+                    (ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return false;
+            for (Network network : cm.getAllNetworks()) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+                if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        // If status cannot be read, fall back to v12's recovery request.
+        return false;
+    }
+
+    private static void keepRestriction(DevicePolicyManager d, ComponentName a,
+                                        String restriction, boolean required) {
+        try {
+            Bundle b = d.getUserRestrictions(a);
+            boolean currently = b != null && b.getBoolean(restriction, false);
+            if (currently == required) return;
+        } catch (Exception ignored) {}
+        try {
+            if (required) d.addUserRestriction(a, restriction);
+            else d.clearUserRestriction(a, restriction);
+        } catch (Exception ignored) {}
+    }
+
+    private static void keepUninstallBlocked(DevicePolicyManager d, ComponentName a, String pkg) {
+        try { if (d.isUninstallBlocked(a, pkg)) return; } catch (Exception ignored) {}
+        try { d.setUninstallBlocked(a, pkg, true); } catch (Exception ignored) {}
+    }
 
     private static final Set<String> ALWAYS_BLOCKED = new HashSet<>(Arrays.asList(
             "com.android.chrome", "com.sec.android.app.sbrowser", "org.mozilla.firefox",
@@ -145,22 +184,16 @@ public final class PolicyUtils {
         if (!isDeviceOwner(c)) return;
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
-        try {
-            if (Prefs.isInstallWindowActive(c)) {
-                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS);
-                d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    d.clearUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY);
-                }
-            } else {
-                Prefs.clearInstallWindow(c);
-                d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_APPS);
-                d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    d.addUserRestriction(a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY);
-                }
-            }
-        } catch (Exception ignored) {}
+        boolean installsAllowed = Prefs.isInstallWindowActive(c);
+        if (!installsAllowed && Prefs.getInstallAllowedUntil(c) != 0L) {
+            Prefs.clearInstallWindow(c);
+        }
+        keepRestriction(d, a, UserManager.DISALLOW_INSTALL_APPS, !installsAllowed);
+        keepRestriction(d, a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES, !installsAllowed);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            keepRestriction(d, a, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY,
+                    !installsAllowed);
+        }
     }
 
     // Adult-content protection, app-install protection, anti-reset and anti-safe-mode policies
@@ -170,36 +203,39 @@ public final class PolicyUtils {
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
 
-        try { d.clearUserRestriction(a, UserManager.DISALLOW_APPS_CONTROL); } catch (Exception ignored) {}
+        keepRestriction(d, a, UserManager.DISALLOW_APPS_CONTROL, false);
 
-        try { d.setUninstallBlocked(a, c.getPackageName(), true); } catch (Exception ignored) {}
+        keepUninstallBlocked(d, a, c.getPackageName());
         if (isAdGuardInstalled(c)) {
-            try { d.setUninstallBlocked(a, ADGUARD_PACKAGE, true); } catch (Exception ignored) {}
+            keepUninstallBlocked(d, a, ADGUARD_PACKAGE);
 
-            // Original v12 behavior: reapply the always-on AdGuard policy every
-            // five-second service tick. Older v12 had lockdown=false here.
-            // A migration from newer versions must first preserve any existing
-            // guardian-enabled lockdown until a guardian approves v12 mode locally.
+            // Preserve v12's automatic AdGuard recovery on each 5-second check
+            // WHEN the VPN is disconnected. Avoid resetting a healthy VPN,
+            // which can destabilize Android's network/status UI.
+            // Any guardian-approved v12 restore remains in effect.
             boolean alwaysOnApplied = false;
             try {
                 boolean existingLockdown = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
                         && d.isAlwaysOnVpnLockdownEnabled(a);
                 boolean lockdown = !Prefs.isV12RestoreAuthorized(c)
                         && (Prefs.hadGuardianVpnLockdown(c) || existingLockdown);
-                d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, lockdown);
+                boolean selected = ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a));
+                if (!selected || existingLockdown != lockdown || !isVpnTunnelUp(c)) {
+                    d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, lockdown);
+                }
                 alwaysOnApplied = ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a));
             } catch (Exception ignored) {}
 
             if (alwaysOnApplied) {
-                try { d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_VPN); } catch (Exception ignored) {}
+                keepRestriction(d, a, UserManager.DISALLOW_CONFIG_VPN, true);
             }
         }
-        try { d.addUserRestriction(a, UserManager.DISALLOW_FACTORY_RESET); } catch (Exception ignored) {}
+        keepRestriction(d, a, UserManager.DISALLOW_FACTORY_RESET, true);
 
         // Safe Mode disables ordinary third-party apps, which would otherwise bypass both
         // Screen Time Guard and AdGuard. Keep safe boot disabled for the entire lifetime of
         // Device Owner, independent of the daily limit or the screen-time protection toggle.
-        try { d.addUserRestriction(a, UserManager.DISALLOW_SAFE_BOOT); } catch (Exception ignored) {}
+        keepRestriction(d, a, UserManager.DISALLOW_SAFE_BOOT, true);
 
         applyInstallProtection(c);
     }
@@ -217,10 +253,9 @@ public final class PolicyUtils {
 
     public static void applyPersistentPolicies(Context c) {
         if (!isDeviceOwner(c)) return;
-        applyAdGuardProtection(c);
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
-        try { d.addUserRestriction(a, UserManager.DISALLOW_CONFIG_DATE_TIME); } catch (Exception ignored) {}
+        keepRestriction(d, a, UserManager.DISALLOW_CONFIG_DATE_TIME, true);
     }
 
     public static void removeScreenTimePolicies(Context c) {
@@ -312,7 +347,11 @@ public final class PolicyUtils {
 
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
-        d.setLockTaskPackages(a, allowed.toArray(new String[0]));
+        String[] existing = d.getLockTaskPackages(a);
+        if (existing == null ||
+                !new HashSet<>(Arrays.asList(existing)).equals(allowed)) {
+            d.setLockTaskPackages(a, allowed.toArray(new String[0]));
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             int features = DevicePolicyManager.LOCK_TASK_FEATURE_HOME
@@ -325,7 +364,9 @@ public final class PolicyUtils {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 features |= DevicePolicyManager.LOCK_TASK_FEATURE_BLOCK_ACTIVITY_START_IN_TASK;
             }
-            d.setLockTaskFeatures(a, features);
+            if (d.getLockTaskFeatures(a) != features) {
+                d.setLockTaskFeatures(a, features);
+            }
         }
     }
 
@@ -375,9 +416,16 @@ public final class PolicyUtils {
         if (!isDeviceOwner(c)) return;
         DevicePolicyManager d = dpm(c);
         ComponentName a = admin(c);
-        try { d.setLockTaskPackages(a, new String[0]); } catch (Exception ignored) {}
+        try {
+            String[] current = d.getLockTaskPackages(a);
+            if (current != null && current.length > 0) d.setLockTaskPackages(a, new String[0]);
+        } catch (Exception ignored) {}
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try { d.setLockTaskFeatures(a, DevicePolicyManager.LOCK_TASK_FEATURE_NONE); } catch (Exception ignored) {}
+            try {
+                if (d.getLockTaskFeatures(a) != DevicePolicyManager.LOCK_TASK_FEATURE_NONE) {
+                    d.setLockTaskFeatures(a, DevicePolicyManager.LOCK_TASK_FEATURE_NONE);
+                }
+            } catch (Exception ignored) {}
         }
     }
 
