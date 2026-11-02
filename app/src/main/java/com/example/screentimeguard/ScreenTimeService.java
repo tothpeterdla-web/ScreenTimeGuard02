@@ -18,6 +18,7 @@ public class ScreenTimeService extends Service {
     private static final long POLL_MS = 5_000L;
     private static final long WIDGET_UPDATE_MS = 30_000L;
     private long lastWidgetUpdate = 0L;
+    private String lastNotificationText;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private final Runnable poll = new Runnable() {
@@ -149,8 +150,14 @@ public class ScreenTimeService extends Service {
     }
 
     private void update(String text) {
+        // Avoid forcing System UI to rebuild an identical notification
+        // every 5 seconds. Changes are still published immediately.
+        if (text.equals(lastNotificationText)) return;
         NotificationManager nm = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
-        if (nm != null) nm.notify(ID, buildNotification(text));
+        if (nm != null) {
+            nm.notify(ID, buildNotification(text));
+            lastNotificationText = text;
+        }
     }
 
     @Override public void onDestroy() {
