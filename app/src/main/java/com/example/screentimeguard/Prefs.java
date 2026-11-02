@@ -11,6 +11,10 @@ import java.util.Set;
 public final class Prefs {
     private static final String NAME = "screen_time_guard";
     private static final String KEY_ENABLED = "enabled";
+    // This key is persisted by v13-v19. Do not silently weaken the guardian's
+    // existing lockdown when installing older v12-based code.
+    private static final String KEY_PRIOR_VPN_LOCKDOWN = "vpn_lockdown_enabled";
+    private static final String KEY_V12_RESTORE_AUTHORIZED = "guardian_v12_restore_authorized";
     private static final String KEY_LIMIT_MINUTES = "limit_minutes";
     private static final String KEY_OVERRIDE_UNTIL = "override_until";
     private static final String KEY_EXTRA_ALLOWED_PACKAGES = "extra_allowed_packages";
@@ -32,6 +36,19 @@ public final class Prefs {
 
     public static void setEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply();
+    }
+
+    public static boolean hadGuardianVpnLockdown(Context context) {
+        return prefs(context).getBoolean(KEY_PRIOR_VPN_LOCKDOWN, false);
+    }
+
+    // Only call setV12RestoreAuthorized(true) after local Guardian PIN verification.
+    public static boolean isV12RestoreAuthorized(Context context) {
+        return prefs(context).getBoolean(KEY_V12_RESTORE_AUTHORIZED, false);
+    }
+
+    public static boolean setV12RestoreAuthorized(Context context, boolean authorized) {
+        return prefs(context).edit().putBoolean(KEY_V12_RESTORE_AUTHORIZED, authorized).commit();
     }
 
     public static int getLimitMinutes(Context context) {
