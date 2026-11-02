@@ -730,6 +730,9 @@ public class MainActivity extends Activity {
         EditText e = num(hint);
         e.setTextSize(18);
         e.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        // Mask *every* character immediately, even when Android is configured
+        // to briefly display the most recently entered password character.
+        e.setTransformationMethod(ImmediatePinMask.getInstance());
         return e;
     }
 
