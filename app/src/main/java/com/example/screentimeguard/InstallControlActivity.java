@@ -85,6 +85,15 @@ public class InstallControlActivity extends Activity {
         // Tightening installation protection never requires a PIN.
         Button lock = button("Block app installations now");
         lock.setOnClickListener(v -> {
+            // A guardian-approved automatic-update mode must also be disabled,
+            // otherwise clearing the temporary window alone does not block installs.
+            if (Prefs.isUpdateOnlyModeEnabled(this)
+                    && !PolicyUtils.disableAutomaticUpdates(this)) {
+                Toast.makeText(this, "Could not disable automatic-update mode",
+                        Toast.LENGTH_LONG).show();
+                refresh();
+                return;
+            }
             Prefs.clearInstallWindow(this);
             PolicyUtils.applyInstallProtection(this);
             Toast.makeText(this, "App installations blocked", Toast.LENGTH_SHORT).show();
