@@ -240,6 +240,7 @@ public class InstallControlActivity extends Activity {
         EditText pin = new EditText(this);
         pin.setHint("Guardian PIN");
         pin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pin.setTransformationMethod(ImmediatePinMask.getInstance());
         pin.setSingleLine(true);
         pin.setTextColor(TEXT);
         pin.setHintTextColor(MUTED);
