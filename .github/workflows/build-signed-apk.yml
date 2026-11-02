@@ -2,7 +2,7 @@ name: Build Signed Android APK
 
 on:
   push:
-    branches: [ "main", "feature/remote-parent-unlock", "fix/v20-true-v12-guardian-restore", "fix/v22-automatic-updates-app-quarantine" ]
+    branches: [ "main", "feature/remote-parent-unlock", "fix/v20-true-v12-guardian-restore", "fix/v22-automatic-updates-app-quarantine", "fix/v23-adguard-stop-protection" ]
   workflow_dispatch:
 
 permissions:
