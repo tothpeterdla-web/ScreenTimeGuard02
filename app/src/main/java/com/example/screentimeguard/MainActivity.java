@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
     private TextView ownerValue;
     private TextView pinValue;
     private TextView adguardValue;
+    private TextView legacyVpnModeValue;
     private TextView restrictedValue;
     private TextView allowedCount;
     private ProgressBar dailyProgress;
@@ -215,6 +216,20 @@ public class MainActivity extends Activity {
         restrictedValue = statusTile(statusRow2, "Restricted mode");
         protection.addView(statusRow2);
         root.addView(protection, full(0, 0, 0, 14));
+
+        // Only migration control added to the actual v12 interface.
+        LinearLayout vpnRestoreCard = card();
+        vpnRestoreCard.addView(text("AdGuard VPN — v12 restore", 20, TEXT, true));
+        vpnRestoreCard.addView(text("Original v12 re-applies the always-on AdGuard VPN every 5 seconds. " +
+                "Guardian approval is required before restoring the older non-lockdown mode, " +
+                "which can allow Internet without filtering if AdGuard stops.", 13, MUTED, false),
+                full(0, 3, 0, 10));
+        legacyVpnModeValue = text("Checking VPN policy…", 13, MUTED, true);
+        vpnRestoreCard.addView(legacyVpnModeValue, full(0, 0, 0, 9));
+        Button restoreLegacyVpn = actionButton("Restore v12 VPN mode (Guardian PIN)", ACCENT);
+        restoreLegacyVpn.setOnClickListener(v -> requirePin(this::confirmV12VpnRestore));
+        vpnRestoreCard.addView(restoreLegacyVpn, actionLp());
+        root.addView(vpnRestoreCard, full(0, 0, 0, 14));
 
         LinearLayout limitCard = card();
         limitCard.addView(text("Daily limit", 21, TEXT, true));
@@ -394,6 +409,15 @@ public class MainActivity extends Activity {
                 "Yes", "No");
         setState(restrictedValue, PolicyUtils.isRestrictedModeActive(this), "On", "Off");
 
+        boolean lockdown = PolicyUtils.isVpnLockdownActive(this);
+        boolean approved = Prefs.isV12RestoreAuthorized(this);
+        legacyVpnModeValue.setText(approved
+                ? (lockdown ? "Approval saved; Android has not confirmed the policy change" :
+                              "V12 behavior enabled — VPN lockdown OFF")
+                : (lockdown ? "Lockdown retained — guardian PIN required for v12 mode" :
+                              "VPN lockdown OFF — old v12-style always-on policy"));
+        legacyVpnModeValue.setTextColor(lockdown ? WARN : MUTED);
+
         int extra = Prefs.getExtraAllowedPackages(this).size();
         allowedCount.setText(extra + (extra == 1 ? " extra" : " extra"));
         refreshQuickControls();
@@ -422,6 +446,32 @@ public class MainActivity extends Activity {
         } else {
             rotationButton.setText("Auto rotation   grant control permission ›");
         }
+    }
+
+    // The Guardian PIN is verified by requirePin BEFORE this confirmation appears.
+    private void confirmV12VpnRestore() {
+        new AlertDialog.Builder(this)
+                .setTitle("Restore original v12 VPN behavior?")
+                .setMessage("This retains AdGuard as the always-on VPN and keeps app/PIN protection. " +
+                        "However, when AdGuard stops, Android may allow network access outside " +
+                        "AdGuard until the VPN reconnects. Guardian approval is required.")
+                .setPositiveButton("Approve v12 behavior", (dialog, which) -> {
+                    if (!Prefs.setV12RestoreAuthorized(this, true)) {
+                        msg("Restore failed", "Could not save guardian approval.");
+                        return;
+                    }
+                    PolicyUtils.applyAdGuardProtection(this);
+                    if (PolicyUtils.isVpnLockdownActive(this)) {
+                        Prefs.setV12RestoreAuthorized(this, false);
+                        msg("Restore not applied", "Android still reports VPN lockdown as active.");
+                    } else {
+                        Toast.makeText(this, "V12 VPN mode approved. AdGuard stays always-on.",
+                                Toast.LENGTH_LONG).show();
+                    }
+                    refresh();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void toggleBluetooth() {
