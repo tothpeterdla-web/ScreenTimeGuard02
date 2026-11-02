@@ -15,8 +15,8 @@ android {
         applicationId "com.example.screentimeguard"
         minSdk 28
         targetSdk 35
-        versionCode 23
-        versionName "23.0-adguard-stop-protection"
+        versionCode 24
+        versionName "24.0-immediate-guardian-pin-dots"
     }
 
     signingConfigs {
