@@ -390,7 +390,9 @@ public class MainActivity extends Activity {
         setState(ownerValue, PolicyUtils.isDeviceOwner(this), "Yes", "No");
         setState(pinValue, PinStore.hasPin(this), "Set", "Missing");
         setState(adguardValue,
-                PolicyUtils.isAdGuardInstalled(this) && PolicyUtils.isAdGuardUninstallBlocked(this),
+                PolicyUtils.isAdGuardInstalled(this)
+                        && PolicyUtils.isAdGuardUninstallBlocked(this)
+                        && PolicyUtils.isAdGuardStopProtected(this),
                 "Yes", "No");
         setState(restrictedValue, PolicyUtils.isRestrictedModeActive(this), "On", "Off");
 
