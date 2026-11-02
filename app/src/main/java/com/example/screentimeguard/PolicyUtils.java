@@ -176,12 +176,17 @@ public final class PolicyUtils {
         if (isAdGuardInstalled(c)) {
             try { d.setUninstallBlocked(a, ADGUARD_PACKAGE, true); } catch (Exception ignored) {}
 
-            // Keep AdGuard selected as the system always-on VPN, but deliberately do NOT enable
-            // VPN lockdown. This avoids cutting off all internet if AdGuard fails to start.
-            // Only lock VPN settings after Android confirms the always-on assignment succeeded.
+            // Original v12 behavior: reapply the always-on AdGuard policy every
+            // five-second service tick. Older v12 had lockdown=false here.
+            // A migration from newer versions must first preserve any existing
+            // guardian-enabled lockdown until a guardian approves v12 mode locally.
             boolean alwaysOnApplied = false;
             try {
-                d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, false);
+                boolean existingLockdown = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                        && d.isAlwaysOnVpnLockdownEnabled(a);
+                boolean lockdown = !Prefs.isV12RestoreAuthorized(c)
+                        && (Prefs.hadGuardianVpnLockdown(c) || existingLockdown);
+                d.setAlwaysOnVpnPackage(a, ADGUARD_PACKAGE, lockdown);
                 alwaysOnApplied = ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(a));
             } catch (Exception ignored) {}
 
@@ -197,6 +202,17 @@ public final class PolicyUtils {
         try { d.addUserRestriction(a, UserManager.DISALLOW_SAFE_BOOT); } catch (Exception ignored) {}
 
         applyInstallProtection(c);
+    }
+
+    public static boolean isVpnLockdownActive(Context c) {
+        if (!isDeviceOwner(c) || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false;
+        try {
+            DevicePolicyManager d = dpm(c);
+            return ADGUARD_PACKAGE.equals(d.getAlwaysOnVpnPackage(admin(c)))
+                    && d.isAlwaysOnVpnLockdownEnabled(admin(c));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public static void applyPersistentPolicies(Context c) {
