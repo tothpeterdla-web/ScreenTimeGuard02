@@ -82,13 +82,14 @@ public class InstallControlActivity extends Activity {
         }));
         card.addView(allow, buttonLp());
 
-        Button lock = button("Disable app installations now");
-        lock.setOnClickListener(v -> requirePin(() -> {
+        // Tightening installation protection never requires a PIN.
+        Button lock = button("Block app installations now");
+        lock.setOnClickListener(v -> {
             Prefs.clearInstallWindow(this);
             PolicyUtils.applyInstallProtection(this);
             Toast.makeText(this, "App installations blocked", Toast.LENGTH_SHORT).show();
             refresh();
-        }));
+        });
         card.addView(lock, buttonLp());
 
         card.addView(text("When enabled, installs from Play Store, other app stores, and APK files are allowed for 15 minutes, then automatically blocked again. Ordinary file downloads are not affected.",
@@ -108,7 +109,10 @@ public class InstallControlActivity extends Activity {
         updatesCard.addView(text("Existing apps can update without a PIN. Android may still download and install a new app, but ScreenTimeGuard hides it until guardian approval. There can be a short detection delay.",
                 13, MUTED, false), full(0, 7, 0, 10));
 
-        Button enableUpdates = button("Enable automatic updates (Guardian PIN)");
+        // Automatic updates clears the system-wide app-install restriction.
+        // It therefore requires the guardian PIN even though new apps are
+        // subsequently quarantined.
+        Button enableUpdates = button("Allow updates with quarantine (Guardian PIN)");
         enableUpdates.setOnClickListener(v -> requirePin(() ->
                 new AlertDialog.Builder(this)
                         .setTitle("Enable automatic updates?")
@@ -129,13 +133,15 @@ public class InstallControlActivity extends Activity {
         review.setOnClickListener(v -> requirePin(this::showQuarantinedApps));
         updatesCard.addView(review, buttonLp());
 
-        Button strict = button("Restore strict installation block (Guardian PIN)");
-        strict.setOnClickListener(v -> requirePin(() -> {
+        // Switching back from quarantine to the stricter install block is
+        // a security-increasing action and must not require a guardian PIN.
+        Button strict = button("Restore strict installation block");
+        strict.setOnClickListener(v -> {
             boolean ok = PolicyUtils.disableAutomaticUpdates(this);
             Toast.makeText(this, ok ? "Strict installation block restored"
                     : "Could not restore installation policy", Toast.LENGTH_LONG).show();
             refresh();
-        }));
+        });
         updatesCard.addView(strict, buttonLp());
 
         ScrollView scroller = new ScrollView(this);
